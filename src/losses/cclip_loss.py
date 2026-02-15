@@ -185,7 +185,8 @@ class CCLIPLoss(nn.Module):
         clip_loss_value = self.clip_loss(image_features, text_features)
         
         # Compute CKC loss if enabled and old features available
-        ckc_loss_value = torch.tensor(0.0, device=image_features.device)
+        # Use a proper zero tensor that maintains gradient tracking
+        ckc_loss_value = image_features.sum() * 0.0
         
         if self.use_ckc and old_image_features is not None:
             if projected_image_features is None or projected_text_features is None:

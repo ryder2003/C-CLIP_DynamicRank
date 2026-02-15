@@ -4,10 +4,14 @@ Evaluates trained model on retrieval and zero-shot classification tasks.
 """
 
 import os
+import sys
 import argparse
 import torch
 from torch.utils.data import DataLoader
 import json
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.models.cclip import CCLIP
 from src.data.datasets import ImageTextDataset

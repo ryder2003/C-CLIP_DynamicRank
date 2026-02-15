@@ -54,6 +54,16 @@ class LoRALayer(nn.Module):
         # Initialize A with Kaiming uniform, B with zeros
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
+    
+    @property
+    def weight(self):
+        """Expose weight attribute for compatibility with MultiheadAttention."""
+        return self.original_layer.weight
+    
+    @property
+    def bias(self):
+        """Expose bias attribute for compatibility with MultiheadAttention."""
+        return self.original_layer.bias if hasattr(self.original_layer, 'bias') else None
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

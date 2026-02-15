@@ -3,6 +3,7 @@ Training script for C-CLIP continual learning.
 """
 
 import os
+import sys
 import argparse
 import torch
 import torch.nn as nn
@@ -13,6 +14,9 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 from typing import Dict, Any
 import wandb
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.models.cclip import CCLIP
 from src.losses.cclip_loss import CCLIPLoss, compute_retrieval_metrics
@@ -157,6 +161,11 @@ class CCLIPTrainer(pl.LightningModule):
         
         # Filter out empty groups
         param_groups = [g for g in param_groups if len(g['params']) > 0]
+        
+        # Debug: Print parameter counts
+        for g in param_groups:
+            num_params = sum(p.numel() for p in g['params'])
+            print(f"Optimizer group '{g['name']}': {num_params:,} parameters")
         
         optimizer = AdamW(
             param_groups,
