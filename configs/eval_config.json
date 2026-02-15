@@ -1,0 +1,20 @@
+[
+  {
+    "name": "flickr30k",
+    "type": "retrieval",
+    "data_path": "data/flickr30k/test.csv",
+    "image_dir": "data/flickr30k/images"
+  },
+  {
+    "name": "coco",
+    "type": "retrieval",
+    "data_path": "data/coco/test.csv",
+    "image_dir": "data/coco/images"
+  },
+  {
+    "name": "imagenet",
+    "type": "classification",
+    "data_path": "data/imagenet/val",
+    "class_names_path": "data/imagenet/class_names.txt"
+  }
+]

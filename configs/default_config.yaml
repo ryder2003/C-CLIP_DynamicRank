@@ -1,0 +1,68 @@
+# Model settings
+model:
+  clip_model_name: "ViT-B-16"  # Options: ViT-B-32, ViT-B-16, ViT-L-14
+  pretrained: "openai"
+  lora_r: 16  # LoRA rank
+  lora_alpha: 32  # LoRA scaling factor (typically 2*r)
+  lora_dropout: 0.1
+  lora_target_modules:
+    - "q_proj"
+    - "v_proj"
+  integration_coeff: 0.5  # Alpha for merging LoRA weights
+
+# Training settings
+training:
+  batch_size: 256  # Use 1024 for ViT-B, 256 for ViT-L
+  epochs_per_task: 40
+  base_lr: 0.00001  # 1e-5, adjust per dataset
+  text_lr_multiplier: 10  # Text encoder LR = base_lr * multiplier (10-80x)
+  weight_decay: 0.2
+  warmup_epochs: 5
+  optimizer: "adamw"
+  beta1: 0.9
+  beta2: 0.99
+  temperature: 0.07  # Temperature for contrastive loss
+
+# Data settings
+data:
+  image_size: 224  # 336 for ViT-L-14@336px
+  max_text_length: 77
+  num_workers: 4
+
+# Datasets for continual learning
+# Each dataset should have train_path, val_path, and image_dir
+datasets:
+  - name: "flickr30k"
+    train_path: "data/flickr30k/train.csv"
+    val_path: "data/flickr30k/val.csv"
+    image_dir: "data/flickr30k/images"
+  
+  - name: "coco"
+    train_path: "data/coco/train.csv"
+    val_path: "data/coco/val.csv"
+    image_dir: "data/coco/images"
+  
+  - name: "pets"
+    train_path: "data/pets/train.csv"
+    val_path: "data/pets/val.csv"
+    image_dir: "data/pets/images"
+  
+  - name: "lexica"
+    train_path: "data/lexica/train.csv"
+    val_path: "data/lexica/val.csv"
+    image_dir: "data/lexica/images"
+
+# Logging and checkpointing
+logging:
+  project_name: "c-clip"
+  experiment_name: "baseline"
+  log_every_n_steps: 50
+  save_checkpoint_every_n_epochs: 10
+  checkpoint_dir: "checkpoints"
+  use_wandb: false  # Set to true to use Weights & Biases
+
+# Hardware settings
+hardware:
+  accelerator: "gpu"  # Options: gpu, cpu
+  devices: 1  # Number of GPUs
+  precision: "16-mixed"  # Options: 32, 16-mixed, bf16-mixed
