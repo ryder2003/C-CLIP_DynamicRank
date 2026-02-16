@@ -170,8 +170,9 @@ class CCLIP(nn.Module):
         # Clear LoRA layers
         self.lora_layers = {}
         
-        # Update references
+        # Update references and ensure model stays on correct device
         self.clip.visual = self.clip.model.visual
+        self.clip.model = self.clip.model.to(self.device)
         
         print("LoRA weights merged into base model")
         
