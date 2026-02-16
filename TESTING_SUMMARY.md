@@ -1,12 +1,7 @@
 # Testing Commands Summary - Successfully Executed
 
-## ✅ What You Just Did
 
-You successfully tested your trained C-CLIP model on a completely independent dataset!
-
----
-
-## Commands You Executed
+## Commands Executed
 
 ### 1. Run Interactive Test
 ```powershell
