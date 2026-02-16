@@ -35,13 +35,13 @@ def test_on_independent_data():
     
     # Check if checkpoint exists
     if not os.path.exists(checkpoint_path):
-        print(f"❌ Checkpoint not found: {checkpoint_path}")
+        print(f"[ERROR] Checkpoint not found: {checkpoint_path}")
         print("Please train the model first.")
         return
     
     # Check if test data exists
     if not os.path.exists(test_data_path):
-        print(f"❌ Test data not found: {test_data_path}")
+        print(f"[ERROR] Test data not found: {test_data_path}")
         print("Run: python generate_test_dataset.py")
         return
     
@@ -68,7 +68,7 @@ def test_on_independent_data():
         model.text_projector.load_state_dict(checkpoint['projector_state_dict']['text'])
     
     model.eval()
-    print("✅ Model loaded successfully!")
+    print("[OK] Model loaded successfully!")
     print()
     
     # Load test data
@@ -121,12 +121,12 @@ def test_on_independent_data():
     print(" "*27 + "RESULTS")
     print("="*70)
     print()
-    print("📊 Image-to-Text Retrieval:")
+    print("IMAGE-TO-TEXT RETRIEVAL:")
     print(f"   Recall@1:  {metrics['i2t_recall@1']:>6.2f}%")
     print(f"   Recall@5:  {metrics['i2t_recall@5']:>6.2f}%")
     print(f"   Recall@10: {metrics['i2t_recall@10']:>6.2f}%")
     print()
-    print("📊 Text-to-Image Retrieval:")
+    print("TEXT-TO-IMAGE RETRIEVAL:")
     print(f"   Recall@1:  {metrics['t2i_recall@1']:>6.2f}%")
     print(f"   Recall@5:  {metrics['t2i_recall@5']:>6.2f}%")
     print(f"   Recall@10: {metrics['t2i_recall@10']:>6.2f}%")
@@ -135,13 +135,13 @@ def test_on_independent_data():
     
     # Interpretation
     print()
-    print("💡 Interpretation:")
-    print(f"   • Test set size: {len(dataset)} samples")
-    print(f"   • Recall@10: {metrics['i2t_recall@10']:.1f}% (for {len(dataset)} samples, top-10 may not be 100%)")
-    print(f"   • This is UNSEEN data - never used in training or validation")
-    print(f"   • Performance shows generalization capability")
+    print("INTERPRETATION:")
+    print(f"   - Test set size: {len(dataset)} samples")
+    print(f"   - Recall@10: {metrics['i2t_recall@10']:.1f}% (for {len(dataset)} samples, top-10 may not be 100%)")
+    print(f"   - This is UNSEEN data - never used in training or validation")
+    print(f"   - Performance shows generalization capability")
     print()
-    print("✅ Testing completed!")
+    print("[COMPLETED] Testing finished successfully!")
     print("="*70)
 
 if __name__ == '__main__':
