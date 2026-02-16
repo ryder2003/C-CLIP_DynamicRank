@@ -71,21 +71,8 @@ class CCLIPTrainer(pl.LightningModule):
         """Training step."""
         images, text = batch
         
-        # Debug: Check training mode
-        if batch_idx == 0:
-            print(f"Model training mode: {self.model_cclip.training}")
-            print(f"CLIP model training mode: {self.model_cclip.clip.training}")
-            print(f"Images requires_grad: {images.requires_grad}")
-        
         # Forward pass
         outputs = self(images, text)
-        
-        # Debug: Check feature gradients
-        if batch_idx == 0:
-            print(f"Image features requires_grad: {outputs['image_features'].requires_grad}")
-            print(f"Text features requires_grad: {outputs['text_features'].requires_grad}")
-            print(f"Projected image features requires_grad: {outputs['projected_image_features'].requires_grad}")
-            print(f"Projected text features requires_grad: {outputs['projected_text_features'].requires_grad}")
         
         # Compute loss
         loss_dict = self.criterion(
@@ -106,13 +93,6 @@ class CCLIPTrainer(pl.LightningModule):
         # Log metrics
         self.log('train/total_loss', loss_dict['total_loss'], on_step=True, on_epoch=True, prog_bar=True)
         self.log('train/clip_loss', loss_dict['clip_loss'], on_step=True, on_epoch=True)
-        
-        # Debug gradient tracking
-        if batch_idx == 0:
-            print(f"Loss requires_grad: {loss_dict['total_loss'].requires_grad}")
-            print(f"Loss grad_fn: {loss_dict['total_loss'].grad_fn}")
-            print(f"CLIP loss requires_grad: {loss_dict['clip_loss'].requires_grad}")
-            print(f"CKC loss requires_grad: {loss_dict['ckc_loss'].requires_grad}")
         self.log('train/ckc_loss', loss_dict['ckc_loss'], on_step=True, on_epoch=True)
         self.log('train/i2t_recall@1', metrics['i2t_recall@1'], on_step=True, on_epoch=True)
         self.log('train/t2i_recall@1', metrics['t2i_recall@1'], on_step=True, on_epoch=True)
@@ -181,11 +161,6 @@ class CCLIPTrainer(pl.LightningModule):
         
         # Filter out empty groups
         param_groups = [g for g in param_groups if len(g['params']) > 0]
-        
-        # Debug: Print parameter counts
-        for g in param_groups:
-            num_params = sum(p.numel() for p in g['params'])
-            print(f"Optimizer group '{g['name']}': {num_params:,} parameters")
         
         optimizer = AdamW(
             param_groups,

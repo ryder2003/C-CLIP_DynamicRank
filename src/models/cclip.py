@@ -151,10 +151,6 @@ class CCLIP(nn.Module):
         lora_params = count_lora_parameters(self.clip.model)
         print(f"LoRA parameters: {lora_params:,}")
         
-        # Debug: Check if LoRA params are trainable
-        trainable_lora = sum(p.numel() for p in get_lora_parameters(self.clip.model) if p.requires_grad)
-        print(f"Trainable LoRA parameters: {trainable_lora:,}")
-        
         self.current_task += 1
         
     def merge_lora_after_task(self):
