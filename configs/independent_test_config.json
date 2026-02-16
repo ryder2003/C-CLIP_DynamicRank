@@ -1,0 +1,8 @@
+[
+  {
+    "name": "independent_test",
+    "type": "retrieval",
+    "data_path": "data/test_independent/test.csv",
+    "image_dir": "data/test_independent"
+  }
+]

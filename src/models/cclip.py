@@ -269,13 +269,31 @@ class CCLIP(nn.Module):
     def load_checkpoint(self, path: str):
         """
         Load model checkpoint.
+        Note: If checkpoint was saved with LoRA structure, need to inject LoRA first.
         """
         checkpoint = torch.load(path, map_location=self.device)
         
-        self.clip.model.load_state_dict(checkpoint['clip_state_dict'])
-        self.vision_projector.load_state_dict(checkpoint['vision_projector_state_dict'])
-        self.text_projector.load_state_dict(checkpoint['text_projector_state_dict'])
-        self.current_task = checkpoint['current_task']
+        # Check if checkpoint has LoRA structure
+        has_lora_structure = any('lora_A' in key or 'original_layer' in key 
+                                  for key in checkpoint['clip_state_dict'].keys())
+        
+        if has_lora_structure:
+            print("Checkpoint has LoRA structure, injecting LoRA...")
+            self.inject_lora_for_new_task()
+            # Load with strict=False to handle any structure differences
+            self.clip.model.load_state_dict(checkpoint['clip_state_dict'], strict=False)
+        else:
+            self.clip.model.load_state_dict(checkpoint['clip_state_dict'])
+        
+        # Load projectors (handle both old and new key names)
+        if 'vision_projector_state_dict' in checkpoint:
+            self.vision_projector.load_state_dict(checkpoint['vision_projector_state_dict'])
+            self.text_projector.load_state_dict(checkpoint['text_projector_state_dict'])
+        elif 'projector_state_dict' in checkpoint:
+            self.image_projector.load_state_dict(checkpoint['projector_state_dict']['image'])
+            self.text_projector.load_state_dict(checkpoint['projector_state_dict']['text'])
+        
+        self.current_task = checkpoint.get('current_task', 'unknown')
         
         # Update references
         self.clip.visual = self.clip.model.visual
