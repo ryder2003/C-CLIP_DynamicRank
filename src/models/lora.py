@@ -102,6 +102,9 @@ class LoRALayer(nn.Module):
         if self.original_layer.bias is not None:
             merged_layer.bias.data = self.original_layer.bias.data.clone()
         
+        # Move to same device as LoRA params
+        merged_layer = merged_layer.to(self.lora_A.device)
+        
         return merged_layer
 
 
