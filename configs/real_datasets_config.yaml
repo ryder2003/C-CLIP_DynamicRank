@@ -16,18 +16,17 @@ model:
   integration_coeff: 0.5        # alpha for merging old/new LoRA weights
 
 # ── Training ───────────────────────────────────────────────────────────────
-# Tuned for NVIDIA RTX 3050 6GB VRAM with ViT-B-16 and 16-mixed precision.
-# batch_size=128:  ~4.5 GB VRAM usage – safe ceiling for 6 GB.
-# epochs_per_task=30:  3× more than before; paper uses 40 (we accept a
-#                      small accuracy trade-off to keep runtime reasonable).
-# text_lr_multiplier=10:  matches asymmetric LR in the paper for text encoder.
+# RTX 3050 6GB test results:
+#   batch=128 → 1.64 GB  |  batch=192 → 1.90 GB  |  batch=256 → 2.16 GB
+# batch_size=256 matches the paper's minimum and is fully safe on 6 GB.
+# More negatives per step = significantly better contrastive loss convergence.
 training:
-  batch_size: 128               # 64 → too few negatives; 256 will OOM on 6 GB
+  batch_size: 256               # paper minimum; safe on 6 GB (measured: 2.16 GB peak)
   epochs_per_task: 30           # paper: 40; 30 gives ~90% of convergence
   base_lr: 0.00001
   text_lr_multiplier: 10
   weight_decay: 0.2
-  warmup_epochs: 3              # ~10% of epochs, as per CLIP practice
+  warmup_epochs: 3
   optimizer: "adamw"
   beta1: 0.9
   beta2: 0.99

@@ -21,16 +21,32 @@ class CLIPWrapper(nn.Module):
         device: str = "cuda",
     ):
         super().__init__()
-        
+
+        # OpenAI pretrained weights were trained with QuickGELU activation.
+        # open_clip's default "ViT-B-16" and "ViT-L-14" use standard GELU,
+        # causing a weight mismatch.  Auto-upgrade to the "-quickgelu" variant
+        # when loading openai weights so activations match the pretrained run.
+        OPENAI_QUICKGELU_MAP = {
+            "ViT-B-32":  "ViT-B-32-quickgelu",
+            "ViT-B-16":  "ViT-B-16-quickgelu",
+            "ViT-L-14":  "ViT-L-14-quickgelu",
+        }
+        if pretrained == "openai" and model_name in OPENAI_QUICKGELU_MAP:
+            resolved_name = OPENAI_QUICKGELU_MAP[model_name]
+            print(f"[CLIPWrapper] Resolving '{model_name}' → '{resolved_name}' "
+                  f"to match OpenAI QuickGELU activation")
+        else:
+            resolved_name = model_name
+
         # Load CLIP model
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
-            model_name,
+            resolved_name,
             pretrained=pretrained,
             device=device,
         )
         
         # Get tokenizer
-        self.tokenizer = open_clip.get_tokenizer(model_name)
+        self.tokenizer = open_clip.get_tokenizer(resolved_name)
         
         # Extract encoders (OpenCLIP uses 'visual' and calling model.encode_text)
         self.visual = self.model.visual
@@ -46,7 +62,7 @@ class CLIPWrapper(nn.Module):
         # Temperature parameter
         self.logit_scale = self.model.logit_scale
         
-        print(f"Loaded CLIP model: {model_name} ({pretrained})")
+        print(f"Loaded CLIP model: {resolved_name} ({pretrained})")
         print(f"Embedding dimension: {self.embed_dim}")
         
     def encode_image(self, images: torch.Tensor, normalize: bool = True) -> torch.Tensor:
