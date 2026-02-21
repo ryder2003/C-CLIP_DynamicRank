@@ -1,0 +1,33 @@
+{
+  "checkpoint_path": "checkpoints/real_datasets/model_final.pt",
+  "config_path": "configs/real_datasets_config.yaml",
+  "output_path": "results/real_datasets_eval.json",
+
+  "note": "These are classification datasets. Use eval_zero_shot.py for accuracy metrics. Retrieval metrics are only meaningful for datasets with unique per-image captions (Flickr30k, MSCOCO).",
+
+  "zero_shot_eval_command": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml",
+
+  "eval_datasets": [
+    {
+      "name": "flowers102",
+      "type": "zero_shot_classification",
+      "val_csv": "data/flowers102/val.csv",
+      "image_dir": "datasets/102flowers/jpg",
+      "n_classes": 102
+    },
+    {
+      "name": "oxford_pets",
+      "type": "zero_shot_classification",
+      "val_csv": "data/oxford_pets/val.csv",
+      "image_dir": "datasets/Oxford_IIITPets/images",
+      "n_classes": 37
+    },
+    {
+      "name": "simpsons",
+      "type": "zero_shot_classification",
+      "val_csv": "data/simpsons/val.csv",
+      "image_dir": "datasets/simpsons_archive/simpsons_dataset",
+      "n_classes": 43
+    }
+  ]
+}

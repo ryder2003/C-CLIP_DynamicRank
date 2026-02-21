@@ -1,0 +1,69 @@
+# C-CLIP config for the three downloaded datasets
+# Tasks run in this order: flowers102 → oxford_pets → simpsons
+# Run from repo root:
+#   python src/train.py --config configs/real_datasets_config.yaml
+
+# ── Model ──────────────────────────────────────────────────────────────────
+model:
+  clip_model_name: "ViT-B-16"   # smaller/faster than ViT-L; change to ViT-L-14 for paper results
+  pretrained: "openai"
+  lora_r: 16                    # LoRA rank (paper uses 16)
+  lora_alpha: 32                # 2 × lora_r
+  lora_dropout: 0.1
+  lora_target_modules:
+    - "q_proj"
+    - "v_proj"
+  integration_coeff: 0.5        # alpha for merging old/new LoRA weights
+
+# ── Training ───────────────────────────────────────────────────────────────
+training:
+  batch_size: 64                # lower if VRAM < 8 GB; paper uses 256-1024
+  epochs_per_task: 10           # paper uses 40; reduce for a quick sanity-check
+  base_lr: 0.00001              # 1e-5 (vision encoder LR)
+  text_lr_multiplier: 10        # text encoder LR = base_lr × multiplier
+  weight_decay: 0.2
+  warmup_epochs: 2
+  optimizer: "adamw"
+  beta1: 0.9
+  beta2: 0.99
+  temperature: 0.07
+
+# ── Data ───────────────────────────────────────────────────────────────────
+data:
+  image_size: 224
+  max_text_length: 77
+  num_workers: 0                # set to 4 on Linux; keep 0 on Windows to avoid DataLoader issues
+
+# ── Datasets (continual tasks) ─────────────────────────────────────────────
+# image_dir must be an absolute path OR relative to where Python is launched.
+# CSVs contain image filenames relative to image_dir.
+datasets:
+  - name: "flowers102"
+    train_path: "data/flowers102/train.csv"
+    val_path:   "data/flowers102/val.csv"
+    image_dir:  "datasets/102flowers/jpg"
+
+  - name: "oxford_pets"
+    train_path: "data/oxford_pets/train.csv"
+    val_path:   "data/oxford_pets/val.csv"
+    image_dir:  "datasets/Oxford_IIITPets/images"
+
+  - name: "simpsons"
+    train_path: "data/simpsons/train.csv"
+    val_path:   "data/simpsons/val.csv"
+    image_dir:  "datasets/simpsons_archive/simpsons_dataset"
+
+# ── Logging & checkpoints ──────────────────────────────────────────────────
+logging:
+  project_name: "c-clip-real"
+  experiment_name: "flowers_pets_simpsons"
+  log_every_n_steps: 20
+  save_checkpoint_every_n_epochs: 5
+  checkpoint_dir: "checkpoints/real_datasets"
+  use_wandb: false
+
+# ── Hardware ───────────────────────────────────────────────────────────────
+hardware:
+  accelerator: "auto"           # "gpu" if CUDA available, otherwise "cpu"
+  devices: 1
+  precision: "16-mixed"         # use "32" if VRAM is tight or no GPU
