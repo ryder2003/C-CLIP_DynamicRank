@@ -264,12 +264,16 @@ def train_continual_learning(config_path: str):
             )
         
         # Setup callbacks
+        # NOTE: We monitor val/total_loss rather than val/i2t_recall@1 because
+        # classification datasets (many images share the same caption) produce
+        # artificially near-zero recall@1 within a batch, even when the model
+        # is converging correctly. Loss is the reliable signal.
         callbacks = [
             ModelCheckpoint(
                 dirpath=os.path.join(checkpoint_dir, f'task_{task_idx}'),
-                filename='cclip-{epoch:02d}-{val/i2t_recall@1:.2f}',
-                monitor='val/i2t_recall@1',
-                mode='max',
+                filename='cclip-epoch{epoch:02d}-loss{val/total_loss:.4f}',
+                monitor='val/total_loss',
+                mode='min',
                 save_top_k=3,
             ),
             LearningRateMonitor(logging_interval='epoch'),

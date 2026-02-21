@@ -83,19 +83,33 @@ FLOWER_LABELS = [
 ]   # 102 entries  (Oxford categorisation order 1-102)
 
 def prepare_flowers():
-    img_dir = Path("datasets/102flowers/jpg")
-    images  = sorted(img_dir.glob("image_*.jpg"))
+    img_dir    = Path("datasets/102flowers/jpg")
+    label_file = Path("datasets/102flowers/imagelabels.mat")
+    images     = sorted(img_dir.glob("image_*.jpg"))
 
     if not images:
         print("[flowers] No images found – skipping.")
         return
 
+    # Load official per-image labels from imagelabels.mat (1-indexed)
+    if label_file.exists():
+        import scipy.io
+        mat      = scipy.io.loadmat(str(label_file))
+        id_to_label = {i + 1: int(mat["labels"].flatten()[i]) for i in range(len(mat["labels"].flatten()))}
+        print(f"  Loaded official imagelabels.mat  ({len(id_to_label)} entries)")
+    else:
+        # Fallback: distribute classes round-robin (no accurate label info)
+        id_to_label = None
+        print("  WARNING: imagelabels.mat not found – using round-robin class assignment")
+
     records = []
     for img in images:
-        # image_00001.jpg → index 0  (labels list is 0-indexed here)
-        idx     = int(re.search(r"(\d+)", img.stem).group(1)) - 1
-        idx     = min(idx, len(FLOWER_LABELS) - 1)   # clamp if > 8189
-        label   = FLOWER_LABELS[idx % len(FLOWER_LABELS)]
+        img_id  = int(re.search(r"(\d+)", img.stem).group(1))   # 1-based
+        if id_to_label:
+            class_idx = id_to_label[img_id] - 1                 # → 0-based
+        else:
+            class_idx = (img_id - 1) % len(FLOWER_LABELS)
+        label   = FLOWER_LABELS[class_idx]
         caption = f"a photo of a {label}"
         records.append({"image": img.name, "caption": caption})
 

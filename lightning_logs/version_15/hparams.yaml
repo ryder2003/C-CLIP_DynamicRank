@@ -1,0 +1,51 @@
+config:
+  data:
+    image_size: 224
+    max_text_length: 77
+    num_workers: 0
+  datasets:
+  - image_dir: datasets/102flowers/jpg
+    name: flowers102
+    train_path: data/flowers102/train.csv
+    val_path: data/flowers102/val.csv
+  - image_dir: datasets/Oxford_IIITPets/images
+    name: oxford_pets
+    train_path: data/oxford_pets/train.csv
+    val_path: data/oxford_pets/val.csv
+  - image_dir: datasets/simpsons_archive/simpsons_dataset
+    name: simpsons
+    train_path: data/simpsons/train.csv
+    val_path: data/simpsons/val.csv
+  hardware:
+    accelerator: auto
+    devices: 1
+    precision: 16-mixed
+  logging:
+    checkpoint_dir: checkpoints/real_datasets
+    experiment_name: flowers_pets_simpsons
+    log_every_n_steps: 20
+    project_name: c-clip-real
+    save_checkpoint_every_n_epochs: 5
+    use_wandb: false
+  model:
+    clip_model_name: ViT-B-16
+    integration_coeff: 0.5
+    lora_alpha: 32
+    lora_dropout: 0.1
+    lora_r: 16
+    lora_target_modules:
+    - q_proj
+    - v_proj
+    pretrained: openai
+  training:
+    base_lr: 1.0e-05
+    batch_size: 64
+    beta1: 0.9
+    beta2: 0.99
+    epochs_per_task: 10
+    optimizer: adamw
+    temperature: 0.07
+    text_lr_multiplier: 10
+    warmup_epochs: 2
+    weight_decay: 0.2
+current_task_idx: 0
