@@ -33,7 +33,7 @@ class CLIPWrapper(nn.Module):
         }
         if pretrained == "openai" and model_name in OPENAI_QUICKGELU_MAP:
             resolved_name = OPENAI_QUICKGELU_MAP[model_name]
-            print(f"[CLIPWrapper] Resolving '{model_name}' → '{resolved_name}' "
+            print(f"[CLIPWrapper] Resolving '{model_name}' -> '{resolved_name}' "
                   f"to match OpenAI QuickGELU activation")
         else:
             resolved_name = model_name

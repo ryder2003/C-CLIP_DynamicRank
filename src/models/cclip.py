@@ -97,7 +97,7 @@ class CCLIP(nn.Module):
         This should be called at the beginning of each new task.
         """
         print(f"\n=== Starting Task {self.current_task + 1} ===")
-        
+
         # Save old model for CKC loss (deep copy)
         if self.current_task > 0:
             self.old_clip = copy.deepcopy(self.clip)
@@ -105,53 +105,41 @@ class CCLIP(nn.Module):
             for param in self.old_clip.parameters():
                 param.requires_grad = False
             print("Saved old model for CKC")
-        
+
         # Freeze base model
         self.clip.freeze_base_model()
-        
+
         # Inject LoRA into vision encoder
         vision_lora = inject_lora(
-            model=self.clip.visual,
+            model=self.clip.model.visual,
             target_modules=self.lora_target_modules,
             r=self.lora_r,
             lora_alpha=self.lora_alpha,
             lora_dropout=self.lora_dropout,
         )
-        
-        # Inject LoRA into text encoder (in OpenCLIP, text encoder is part of the main model)
-        # We need to target the transformer in the CLIP model
-        text_lora = {}
-        for name, module in self.clip.model.named_modules():
-            # Target text-related modules (not visual)
-            if any(target in name for target in self.lora_target_modules):
-                if 'visual' not in name.lower() and isinstance(module, nn.Linear):
-                    parent_name = '.'.join(name.split('.')[:-1]) if '.' in name else ''
-                    attr_name = name.split('.')[-1]
-                    
-                    if parent_name:
-                        try:
-                            parent = self.clip.model.get_submodule(parent_name)
-                            from .lora import LoRALayer
-                            lora_layer = LoRALayer(
-                                original_layer=module,
-                                r=self.lora_r,
-                                lora_alpha=self.lora_alpha,
-                                lora_dropout=self.lora_dropout,
-                            )
-                            setattr(parent, attr_name, lora_layer)
-                            text_lora[name] = lora_layer
-                            print(f"Injected LoRA into text module: {name}")
-                        except Exception as e:
-                            continue
-        
-        # Store all LoRA layers
-        self.lora_layers = {**vision_lora, **text_lora}
-        
-        # Count parameters
+
+        # Inject LoRA into text encoder (self.clip.model.transformer)
+        text_lora = inject_lora(
+            model=self.clip.model.transformer,
+            target_modules=self.lora_target_modules,
+            r=self.lora_r,
+            lora_alpha=self.lora_alpha,
+            lora_dropout=self.lora_dropout,
+        )
+
+        # Store all LoRA layers with paths relative to self.clip.model
+        # so merge_all_lora_weights(model=self.clip.model, ...) works correctly.
+        self.lora_layers = (
+            {f"visual.{k}": v for k, v in vision_lora.items()}
+            | {f"transformer.{k}": v for k, v in text_lora.items()}
+        )
+
+        # Count trainable parameters
         lora_params = count_lora_parameters(self.clip.model)
         print(f"LoRA parameters: {lora_params:,}")
-        
+
         self.current_task += 1
+
         
     def merge_lora_after_task(self):
         """
