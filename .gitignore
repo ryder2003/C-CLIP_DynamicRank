@@ -36,6 +36,7 @@ env/
 # Data
 data/
 datasets/
+simpsons_archive/
 *.csv
 *.json
 !configs/*.json
