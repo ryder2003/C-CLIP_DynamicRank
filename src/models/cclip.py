@@ -112,6 +112,15 @@ class CCLIP(nn.Module):
                 param.requires_grad = False
             print("Saved old model for CKC")
 
+            # Re-initialize projectors to identity for the new task.
+            # This ensures projected features start ≈ original features,
+            # giving CKC loss a stable alignment target each task.
+            nn.init.eye_(self.vision_projector.projection.weight)
+            nn.init.zeros_(self.vision_projector.projection.bias)
+            nn.init.eye_(self.text_projector.projection.weight)
+            nn.init.zeros_(self.text_projector.projection.bias)
+            print("Re-initialized projectors to identity for CKC")
+
         # Freeze base model
         self.clip.freeze_base_model()
 
