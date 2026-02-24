@@ -168,11 +168,22 @@ class CCLIPTrainer(pl.LightningModule):
             weight_decay=self.weight_decay,
         )
         
-        # Cosine learning rate scheduler with warmup
-        scheduler = CosineAnnealingLR(
+        # Cosine learning rate scheduler with linear warmup
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.01,   # Start at 1% of base_lr
+            end_factor=1.0,
+            total_iters=self.warmup_epochs,
+        )
+        cosine_scheduler = CosineAnnealingLR(
             optimizer,
             T_max=self.epochs_per_task - self.warmup_epochs,
-            eta_min=0,
+            eta_min=1e-6,
+        )
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[self.warmup_epochs],
         )
         
         return {
