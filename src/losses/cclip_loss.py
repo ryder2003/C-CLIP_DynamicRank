@@ -181,12 +181,11 @@ class CCLIPLoss(nn.Module):
                 - clip_loss: CLIP loss component
                 - ckc_loss: CKC loss component (0 if not used)
         """
-        # Compute CLIP loss on the features that have gradients
-        # Use projected features if available (they have gradients), otherwise use image/text features
-        if projected_image_features is not None and projected_text_features is not None:
-            clip_loss_value = self.clip_loss(projected_image_features, projected_text_features)
-        else:
-            clip_loss_value = self.clip_loss(image_features, text_features)
+        # Compute CLIP loss on DIRECT encoder features (not projected).
+        # This ensures gradients flow directly to LoRA parameters, which is
+        # essential because evaluation uses encode_image/encode_text (no projectors).
+        # Projected features are ONLY used for CKC knowledge consolidation.
+        clip_loss_value = self.clip_loss(image_features, text_features)
         
         # Compute CKC loss if enabled and old features available
         # Use a proper zero tensor that maintains gradient tracking

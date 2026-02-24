@@ -23,9 +23,9 @@ model:
 training:
   batch_size: 256               # paper minimum; safe on 6 GB (measured: 2.16 GB peak)
   epochs_per_task: 30           # paper: 40; 30 gives ~90% of convergence
-  base_lr: 0.00001
-  text_lr_multiplier: 10
-  weight_decay: 0.2
+  base_lr: 0.0002               # 2e-4: proper LoRA fine-tuning rate (was 1e-5, 20x too low)
+  text_lr_multiplier: 5         # text_lr = 1e-3 (was 10 → kept moderate to avoid instability)
+  weight_decay: 0.05            # was 0.2 — too high pushes LoRA weights back to zero
   warmup_epochs: 3
   optimizer: "adamw"
   beta1: 0.9

@@ -14,7 +14,9 @@ from .lora import inject_lora, merge_all_lora_weights, get_lora_parameters, coun
 
 class Projector(nn.Module):
     """
-    Projector layer for creating a connected but not identical feature space.
+    Projector layer for CKC knowledge consolidation.
+    Initialized as near-identity so projected features start close to the
+    original encoder features, giving CKC loss a stable starting point.
     """
     
     def __init__(self, input_dim: int, output_dim: Optional[int] = None):
@@ -22,6 +24,10 @@ class Projector(nn.Module):
         if output_dim is None:
             output_dim = input_dim
         self.projection = nn.Linear(input_dim, output_dim)
+        
+        # Initialize as identity + small noise so projected ≈ original
+        nn.init.eye_(self.projection.weight)
+        nn.init.zeros_(self.projection.bias)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.projection(x)
