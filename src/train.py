@@ -202,6 +202,9 @@ def train_continual_learning(config_path: str):
     Args:
         config_path: Path to configuration file
     """
+    # Suppress Tensor Core precision warning and gain a small speedup
+    torch.set_float32_matmul_precision('medium')
+
     # Load config
     if config_path and os.path.exists(config_path):
         config = load_config(config_path)
@@ -291,6 +294,7 @@ def train_continual_learning(config_path: str):
         ]
         
         # Initialize trainer
+        accumulate_grad = config['training'].get('accumulate_grad_batches', 1)
         trainer = pl.Trainer(
             max_epochs=config['training']['epochs_per_task'],
             accelerator=config['hardware']['accelerator'],
@@ -300,6 +304,7 @@ def train_continual_learning(config_path: str):
             callbacks=callbacks,
             log_every_n_steps=config['logging']['log_every_n_steps'],
             gradient_clip_val=1.0,
+            accumulate_grad_batches=accumulate_grad,
         )
         
         # Train

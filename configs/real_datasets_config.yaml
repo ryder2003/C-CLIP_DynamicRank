@@ -16,15 +16,15 @@ model:
   integration_coeff: 0.5        # alpha for merging old/new LoRA weights
 
 # ── Training ───────────────────────────────────────────────────────────────
-# RTX 3050 6GB test results:
-#   batch=128 → 1.64 GB  |  batch=192 → 1.90 GB  |  batch=256 → 2.16 GB
-# batch_size=256 matches the paper's minimum and is fully safe on 6 GB.
-# More negatives per step = significantly better contrastive loss convergence.
+# VRAM note (RTX 3050 6GB): the old 2.16 GB figure was inference-only.
+# Training requires gradients + AMP scaler + optimizer states → 3-4x more.
+# Safe training config: batch=64 + accumulate_grad_batches=4 → effective batch=256.
 training:
-  batch_size: 256               # paper minimum; safe on 6 GB (measured: 2.16 GB peak)
+  batch_size: 64                # per-step batch; effective batch = 64 × accum_grad = 256
+  accumulate_grad_batches: 4    # accumulate 4 steps before optimizer update
   epochs_per_task: 30           # paper: 40; 30 gives ~90% of convergence
-  base_lr: 0.0002               # 2e-4: proper LoRA fine-tuning rate (was 1e-5, 20x too low)
-  text_lr_multiplier: 5         # text_lr = 1e-3 (was 10 → kept moderate to avoid instability)
+  base_lr: 0.0002               # 2e-4: proper LoRA fine-tuning rate
+  text_lr_multiplier: 5         # text_lr = 1e-3
   weight_decay: 0.05            # was 0.2 — too high pushes LoRA weights back to zero
   warmup_epochs: 3
   optimizer: "adamw"
