@@ -253,9 +253,11 @@ def inject_lora(
     """
     lora_layers = {}
     wants_qv = any(t in ('q_proj', 'v_proj') for t in target_modules)
+    # Linear targets: everything in target_modules that isn't q_proj/v_proj
+    linear_targets = [t for t in target_modules if t not in ('q_proj', 'v_proj')]
 
     for name, module in list(model.named_modules()):
-        # ── Case 1: packed QKV  ───────────────────────────────────────────
+        # ── Case 1: packed QKV (wrap MultiheadAttention for Q/V LoRA) ─────
         if wants_qv and isinstance(module, nn.MultiheadAttention):
             # Skip if already wrapped
             if any(isinstance(child, LoRAForAttn)
@@ -276,10 +278,10 @@ def inject_lora(
             lora_layers[name] = lora_attn
             print(f"Injected Q/V LoRA into attn: {name}")
 
-        # ── Case 2: plain nn.Linear  ──────────────────────────────────────
-        elif (not wants_qv
+        # ── Case 2: plain nn.Linear (for MLP layers like c_fc, c_proj) ───
+        elif (linear_targets
               and isinstance(module, nn.Linear)
-              and any(t in name for t in target_modules)):
+              and any(t in name for t in linear_targets)):
 
             parent_name = '.'.join(name.split('.')[:-1])
             attr_name   = name.split('.')[-1]

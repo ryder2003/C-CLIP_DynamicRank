@@ -134,29 +134,36 @@ class CCLIPTrainer(pl.LightningModule):
     def configure_optimizers(self):
         """Configure optimizer and scheduler."""
         # Get trainable parameters with different learning rates
-        # Vision encoder: base_lr
-        # Text encoder: base_lr * text_lr_multiplier
-        # Projectors: base_lr
+        # Vision encoder LoRA: base_lr, no weight_decay
+        # Text encoder LoRA: base_lr * text_lr_multiplier, no weight_decay
+        # Projectors: base_lr, with weight_decay
         
-        vision_params = []
-        text_params = []
+        vision_lora_params = []
+        text_lora_params = []
         projector_params = []
         
         for name, param in self.model_cclip.named_parameters():
             if not param.requires_grad:
                 continue
             
-            if 'text' in name.lower():
-                text_params.append(param)
-            elif 'projector' in name.lower():
+            name_lower = name.lower()
+            
+            if 'projector' in name_lower:
                 projector_params.append(param)
+            elif 'clip.model.transformer' in name_lower or 'text' in name_lower:
+                # Text encoder LoRA params (in self.clip.model.transformer)
+                text_lora_params.append(param)
             else:
-                vision_params.append(param)
+                # Vision encoder LoRA params (in self.clip.model.visual)
+                vision_lora_params.append(param)
         
         param_groups = [
-            {'params': vision_params, 'lr': self.base_lr, 'name': 'vision'},
-            {'params': text_params, 'lr': self.base_lr * self.text_lr_multiplier, 'name': 'text'},
-            {'params': projector_params, 'lr': self.base_lr, 'name': 'projector'},
+            {'params': vision_lora_params, 'lr': self.base_lr,
+             'weight_decay': 0.0, 'name': 'vision_lora'},
+            {'params': text_lora_params, 'lr': self.base_lr * self.text_lr_multiplier,
+             'weight_decay': 0.0, 'name': 'text_lora'},
+            {'params': projector_params, 'lr': self.base_lr,
+             'weight_decay': self.weight_decay, 'name': 'projector'},
         ]
         
         # Filter out empty groups
@@ -244,6 +251,14 @@ def train_continual_learning(config_path: str):
     checkpoint_dir = config['logging']['checkpoint_dir']
     os.makedirs(checkpoint_dir, exist_ok=True)
     
+    # Clean stale PL checkpoints from previous runs to prevent interference
+    import shutil
+    for task_idx_clean in range(len(config['datasets'])):
+        task_ckpt_dir = os.path.join(checkpoint_dir, f'task_{task_idx_clean}')
+        if os.path.exists(task_ckpt_dir):
+            shutil.rmtree(task_ckpt_dir, ignore_errors=True)
+            print(f"Cleaned stale checkpoint dir: {task_ckpt_dir}")
+    
     # Continual learning loop
     num_tasks = data_module.get_num_tasks()
     print(f"\n{'='*60}")
@@ -258,6 +273,13 @@ def train_continual_learning(config_path: str):
         
         # Inject LoRA for new task
         model.inject_lora_for_new_task()
+        
+        # Snapshot base weights before PL training for integrity check
+        _base_hash = sum(
+            p.data.sum().item()
+            for n, p in model.clip.model.named_parameters()
+            if 'in_proj_weight' in n and not isinstance(p, nn.Parameter) or 'in_proj_weight' in n
+        )
         
         # Set current task in data module
         data_module.set_task(task_idx)
@@ -309,6 +331,16 @@ def train_continual_learning(config_path: str):
         
         # Train
         trainer.fit(trainer_module, data_module)
+        
+        # Integrity check: verify base weights weren't corrupted by PL
+        _post_hash = sum(
+            p.data.sum().item()
+            for n, p in model.clip.model.named_parameters()
+            if 'in_proj_weight' in n
+        )
+        if abs(_base_hash - _post_hash) > 1e-3:
+            print(f"WARNING: Base weights changed during PL training! "
+                  f"(hash diff: {abs(_base_hash - _post_hash):.6f})")
         
         # Merge LoRA weights after task
         model.merge_lora_after_task()
