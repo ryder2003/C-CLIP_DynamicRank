@@ -1,12 +1,54 @@
-torch>=2.0.0
-torchvision>=0.15.0
+# ==============================================================================
+# C-CLIP: Continual CLIP — Python Dependencies
+# ==============================================================================
+#
+# IMPORTANT: Install PyTorch FIRST with the correct CUDA version for your GPU.
+# Visit https://pytorch.org/get-started/locally/ and select your configuration.
+#
+# Examples:
+#   # CUDA 11.8 (RTX 30xx, RTX 40xx)
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+#   # CUDA 12.1 (RTX 40xx, RTX 50xx — recommended for newer GPUs)
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+#   # CUDA 12.4 (latest, RTX 50xx)
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#
+#   # CPU only (no GPU)
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+# After installing PyTorch, install the remaining dependencies:
+#   pip install -r requirements.txt
+#
+# Tested with: Python 3.12, PyTorch 2.7.1+cu118, RTX 3050 6GB
+# ==============================================================================
+
+# ── Core ML Framework ────────────────────────────────────────────────────────
+# Install torch & torchvision separately (see above) for correct CUDA version.
+# Uncomment below ONLY if installing without GPU or if pip handles CUDA for you:
+# torch>=2.1.0
+# torchvision>=0.16.0
+
+# ── Training Framework ───────────────────────────────────────────────────────
 pytorch-lightning>=2.0.0
-ftfy>=6.1.1
-regex>=2023.6.3
-tqdm>=4.65.0
-pillow>=9.5.0
-numpy>=1.24.0
-pandas>=2.0.0
-pyyaml>=6.0
-wandb>=0.15.0
+
+# ── CLIP Model ───────────────────────────────────────────────────────────────
 open_clip_torch>=2.20.0
+
+# ── Data & I/O ───────────────────────────────────────────────────────────────
+Pillow>=9.5.0
+pandas>=2.0.0
+numpy>=1.24.0
+pyyaml>=6.0
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+tqdm>=4.65.0
+ftfy>=6.1.1                    # Text cleanup (used by open_clip tokenizer)
+regex>=2023.6.3                # Advanced regex (used by open_clip tokenizer)
+
+# ── Logging (optional, set use_wandb: true in config to use) ─────────────────
+wandb>=0.15.0
+
+# ── Report Generation (optional, for scripts/generate_report.py) ─────────────
+fpdf2>=2.7.0
