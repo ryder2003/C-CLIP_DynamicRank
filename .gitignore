@@ -28,19 +28,24 @@ venv/
 ENV/
 env/
 
-# PyTorch
+# PyTorch model files
 *.pth
 *.pt
 *.ckpt
 
-# Data
-data/
+# Research papers (PDFs in repo root)
+*.pdf
+
+# Generated report code
+scripts/generate_report.py
+scripts/compute_all_metrics.py
+
+# Raw datasets (large image files)
 datasets/
 simpsons_archive/
-*.csv
-*.json
-!configs/*.json
-!configs/*.yaml
+
+# Prepared data CSVs
+data/
 
 # Checkpoints
 checkpoints/
@@ -48,10 +53,11 @@ checkpoints/
 
 # Logs
 logs/
+lightning_logs/
 wandb/
 *.log
 
-# Results
+# Results (generated outputs)
 results/
 outputs/
 
@@ -77,3 +83,7 @@ temp/
 
 # Testing
 test_checkpoint.pt
+
+# Keep config JSONs and YAMLs
+!configs/*.json
+!configs/*.yaml

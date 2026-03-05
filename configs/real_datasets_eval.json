@@ -7,6 +7,21 @@
 
   "zero_shot_eval_command": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml",
 
+  "per_task_eval_commands": {
+    "after_task_0": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_0.pt --config configs/real_datasets_config.yaml --output results/task0_accuracy.json",
+    "after_task_1": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_1.pt --config configs/real_datasets_config.yaml --output results/task1_accuracy.json",
+    "final": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml --output results/final_accuracy.json"
+  },
+
+  "latest_results_summary": {
+    "pretrained_baseline": {"flowers102": 69.63, "oxford_pets": 88.72, "simpsons": 61.58},
+    "after_task_0": {"flowers102": 99.43, "oxford_pets": 85.47, "simpsons": 51.16},
+    "after_task_1": {"flowers102": 99.19, "oxford_pets": 95.85, "simpsons": 53.27},
+    "final": {"flowers102": 84.69, "oxford_pets": 91.88, "simpsons": 98.12},
+    "avg_final_accuracy": 91.56,
+    "backward_transfer": -9.36
+  },
+
   "eval_datasets": [
     {
       "name": "flowers102",

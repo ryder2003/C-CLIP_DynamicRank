@@ -20,6 +20,52 @@ Based on the paper: *"C-CLIP: Multimodal Continual Learning"*
 - Often **exceeds full fine-tuning** performance on new tasks
 - Demonstrates **positive backward transfer** on previous tasks
 
+## 📊 Our Results (3 Tasks: Flowers102 → Oxford Pets → Simpsons)
+
+### Full Accuracy Progression
+
+The table below tracks zero-shot classification accuracy at every stage, from the pretrained baseline through bug fixes and the final trained model:
+
+| Stage | Flowers102 | Oxford Pets | Simpsons | Notes |
+|-------|-----------|-------------|----------|-------|
+| Pretrained CLIP (GELU, buggy) | 63.36% | 85.02% | 51.45% | Wrong activation function |
+| Pretrained CLIP (QuickGELU, correct) | 69.63% | 88.72% | 61.58% | Correct baseline |
+| 1st Training Run (buggy code) | 69.63% | 88.72% | 61.58% | Identical to baseline — bugs found |
+| **After Task 0 (Flowers)** | **99.43%** | 85.47% | 51.16% | +29.80% on Flowers, no CKC yet |
+| **After Task 1 (Pets)** | **99.19%** | **95.85%** | 53.27% | CKC preserves Flowers at 99%! |
+| **Final (After Task 2, Simpsons)** | **84.69%** | **91.88%** | **98.12%** | All tasks above baseline |
+
+### Key Metrics
+
+#### Paper Metrics (X-TAIL Framework)
+| Metric | Value | Description |
+|--------|-------|-------------|
+| **Last** | **91.56%** | Avg accuracy on all domains after final step |
+| **Average** | **84.34%** | Avg accuracy across all steps x all domains |
+| **Transfer** | **63.30%** | Avg zero-shot on unseen domains during training |
+
+#### Traditional CL Metrics
+| Metric | Value |
+|--------|-------|
+| Backward Transfer (BWT) | **-9.36%** |
+| Forward Transfer (FWT) | -5.78% |
+| Average Forgetting | 9.36% |
+| Avg Incremental Accuracy | **96.17%** |
+| Avg Gain Over Baseline | **+18.25%** |
+| Best single-task gain | +36.54% (Simpsons) |
+| Max forgetting | 14.74% (Flowers) |
+| Trainable parameters | 3.44M / 149M (2.3%) |
+| Training time | ~48 hours (RTX 3050 6GB Laptop) |
+
+### Gain Over Baseline (Final vs Pretrained)
+
+| Dataset | Pretrained | Final (C-CLIP) | Gain |
+|---------|-----------|----------------|------|
+| Flowers102 | 69.63% | 84.69% | +15.06% |
+| Oxford Pets | 88.72% | 91.88% | +3.16% |
+| Simpsons | 61.58% | 98.12% | +36.54% |
+| **Average** | **73.31%** | **91.56%** | **+18.25%** |
+
 ## 🏗️ Architecture
 
 ```
@@ -147,13 +193,19 @@ model:
   clip_model_name: "ViT-B-16"  # ViT-B-32, ViT-B-16, ViT-L-14
   lora_r: 16                    # LoRA rank
   lora_alpha: 32                # Scaling factor
-  integration_coeff: 0.5        # Merging coefficient
+  integration_coeff: 0.7        # Merging coefficient (0.7 recommended)
+  lora_target_modules:           # LoRA targets (attention + MLP)
+    - "q_proj"
+    - "v_proj"
+    - "c_fc"
+    - "c_proj"
 
 training:
-  batch_size: 256               # 1024 for ViT-B, 256 for ViT-L
+  batch_size: 64                # Adjust based on VRAM (64 for 6GB)
+  gradient_accumulation_steps: 4 # Effective batch = 256
   epochs_per_task: 40
-  base_lr: 0.00001             # Adjust per dataset
-  text_lr_multiplier: 10       # Text encoder LR multiplier (10-80x)
+  base_lr: 0.0002              # 2e-4 for LoRA
+  text_lr_multiplier: 5        # Text encoder LR multiplier
 
 datasets:
   - name: "flickr30k"
@@ -200,12 +252,72 @@ python src/evaluate.py \
   --output results/evaluation_results.json
 ```
 
+### Evaluate Zero-Shot Classification (Per-Task Checkpoints)
+
+```bash
+# After Task 0 (Flowers)
+python scripts/eval_zero_shot.py \
+    --checkpoint checkpoints/real_datasets/model_after_task_0.pt \
+    --config configs/real_datasets_config.yaml \
+    --output results/task0_accuracy.json
+
+# After Task 1 (Pets)
+python scripts/eval_zero_shot.py \
+    --checkpoint checkpoints/real_datasets/model_after_task_1.pt \
+    --config configs/real_datasets_config.yaml \
+    --output results/task1_accuracy.json
+
+# After Task 2 / Final Model
+python scripts/eval_zero_shot.py \
+    --checkpoint checkpoints/real_datasets/model_final.pt \
+    --config configs/real_datasets_config.yaml \
+    --output results/final_accuracy.json
+```
+
+### Compute All Metrics (Paper + Traditional CL)
+
+```bash
+# Computes Last, Average, Transfer, BWT, FWT, AF, AIA, and saves to results/comprehensive_metrics.json
+python scripts/compute_all_metrics.py
+```
+
+### Generate PDF Report
+
+```bash
+# Generates comprehensive report at results/CCLIP_Implementation_Report.pdf
+python scripts/generate_report.py
+```
+
+### Full Evaluation Pipeline (One Shot)
+
+```bash
+python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_0.pt --config configs/real_datasets_config.yaml --output results/task0_accuracy.json
+python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_1.pt --config configs/real_datasets_config.yaml --output results/task1_accuracy.json
+python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml --output results/final_accuracy.json
+python scripts/compute_all_metrics.py
+python scripts/generate_report.py
+```
+
 ### Metrics Computed
 
+**Paper Metrics (X-TAIL Framework, NeurIPS 2024):**
+- **Last**: Average accuracy on all domains after the final learning step
+- **Average**: Mean accuracy across all learning steps × all domains
+- **Transfer**: Average zero-shot accuracy on unseen domains during training
+
+**Traditional Continual Learning Metrics:**
+- **Backward Transfer (BWT)**: How much accuracy on old tasks changes after new ones
+- **Forward Transfer (FWT)**: Impact on unseen domains from previous learning
+- **Average Forgetting (AF)**: Average peak-to-final accuracy drop on old tasks
+- **Average Incremental Accuracy (AIA)**: Avg accuracy on learned tasks at each step
+
+**Standard Metrics:**
 - **Image-to-Text Retrieval**: Recall@1, Recall@5, Recall@10
 - **Text-to-Image Retrieval**: Recall@1, Recall@5, Recall@10
 - **Zero-Shot Classification**: Top-1 Accuracy
-- **Forgetting Metrics**: Average forgetting, backward transfer
+- **Gain Over Baseline**: Final vs pretrained accuracy per domain
+
+> See [METRICS_ANALYSIS.md](METRICS_ANALYSIS.md) for detailed mathematical definitions, formulas, interpretations, and computed values for every metric.
 
 ## 🧪 Key Implementation Details
 
@@ -215,7 +327,11 @@ python src/evaluate.py \
 lora_r: 16              # Rank (paper tested 8, 16, 32, 64)
 lora_alpha: 32          # Scaling factor (2*r)
 lora_dropout: 0.1       # Dropout probability
-integration_coeff: 0.5  # Merging coefficient (alpha in paper)
+integration_coeff: 0.7  # Merging coefficient (0.7 optimal for our setup)
+lora_target_modules:    # Inject into attention AND MLP layers
+  - q_proj, v_proj      # Attention Q/V projections (LoRAForAttn)
+  - c_fc, c_proj        # MLP layers (LoRALayer)
+# Total: 72 LoRA layers, 3.44M trainable params
 ```
 
 ### Loss Functions
@@ -235,13 +351,16 @@ L_CKC = -1/(2N) Σ[log(exp(h_new·z_old/τ) / Σexp(h_new·z_old'/τ))]
 L_total = L_CLIP + L_CKC
 ```
 
-### Hyperparameters (from paper)
+### Hyperparameters (our configuration)
 
-- **Optimizer**: AdamW (β₁=0.9, β₂=0.99, weight_decay=0.2)
-- **Scheduler**: Cosine decay with 5-epoch warmup
-- **Batch Size**: 1024 (ViT-B), 256 (ViT-L)
+- **Optimizer**: AdamW (β₁=0.9, β₂=0.99)
+- **Weight Decay**: 0.01 for projectors, 0.0 for LoRA params (critical!)
+- **Scheduler**: Cosine decay with 3-epoch warmup
+- **Batch Size**: 64 micro (effective 256 with gradient accumulation 4)
+- **Base LR**: 2e-4 (vision LoRA), 1e-3 (text LoRA, 5x multiplier)
 - **Temperature**: 0.07
 - **Epochs**: 40 per task
+- **Precision**: 16-mixed (AMP)
 
 ## 📁 Project Structure
 
@@ -291,23 +410,34 @@ The paper proves that constraining parameter changes (via LoRA) is equivalent to
 ||f_θ(v) - f_θ'(v)|| ≤ K_f ||θ - θ'||
 ```
 
-## 📊 Expected Results
+## 📊 Expected Results (Paper) & Our Measured Results
 
-### After Training on 8 Tasks
+### Paper Results (8 Tasks, retrieval metrics)
 
 | Dataset | I2T R@1 | T2I R@1 |
-|---------|---------|---------|
+|---------|---------|---------||
 | Flickr30K | 84.40% | 73.74% |
 | COCO | 56.92% | 42.82% |
 | Pets | ~40% | ~35% |
 | Lexica | 42.65% | 41.47% |
 
-### Zero-Shot Classification
+### Paper Zero-Shot Classification
 
 | Dataset | Accuracy (Final) | Degradation |
 |---------|-----------------|-------------|
 | ImageNet | 60.31% | 7.42% |
 | CIFAR-100 | 61.58% | 5.29% |
+
+### Our Measured Results (3 Tasks: Flowers → Pets → Simpsons)
+
+| Dataset | Pretrained Baseline | After Own Task | Final Model | Gain Over Baseline |
+|---------|-------------------|----------------|-------------|-------------------|
+| Flowers102 | 69.63% | 99.43% | 84.69% | +15.06% |
+| Oxford Pets | 88.72% | 95.85% | 91.88% | +3.16% |
+| Simpsons | 61.58% | 98.12% | 98.12% | +36.54% |
+| **Average** | **73.31%** | **97.80%** | **91.56%** | **+18.25%** |
+
+> **BWT (Backward Transfer)**: -9.36% | Flowers forgetting: -14.74% | Pets forgetting: -3.97%
 
 ## 🐛 Troubleshooting
 

@@ -65,8 +65,9 @@ C-CLip_Implementation/
 **Paper Alignment:**
 - Rank r=16 (default, as in paper)
 - Alpha=32 (2*r, as in paper)
-- Integration coefficient α=0.5 for merging
-- Applied to Q and V projections in attention
+- Integration coefficient α=0.7 for merging (tuned from paper's 0.5)
+- Applied to Q/V projections in attention AND c_fc/c_proj in MLP
+- 72 total LoRA layers (36 vision + 36 text), 3.44M trainable params
 
 ### 2. C-CLIP Model - `src/models/cclip.py`
 
@@ -117,11 +118,13 @@ C-CLip_Implementation/
 - Evaluation after each task
 
 **Paper Alignment:**
-- 40 epochs per task (default)
-- AdamW optimizer (β₁=0.9, β₂=0.99, weight_decay=0.2)
-- Text encoder LR 10-80× higher than vision encoder
-- 5-epoch warmup with cosine decay
-- Batch size 256-1024
+- 40 epochs per task (as in paper)
+- AdamW optimizer (β₁=0.9, β₂=0.99)
+- Weight decay 0.01 for projectors, 0.0 for LoRA params
+- Text encoder LR 5× higher than vision encoder (base_lr=2e-4)
+- 3-epoch warmup with cosine decay
+- Batch size 64 (effective 256 with gradient accumulation 4)
+- Precision: 16-mixed (AMP)
 
 ### 5. Data Handling - `src/data/`
 
@@ -161,8 +164,9 @@ C-CLip_Implementation/
 ### 1. LoRA Integration (Not Just LoRA)
 ✅ Unlike standard LoRA, C-CLIP **merges** weights back:
 ```python
-θ_new = θ_old + 0.5 * (B @ A)
+θ_new = θ_old + 0.7 * (alpha/r) * (B @ A)
 ```
+✅ Applied to BOTH attention (q_proj, v_proj) AND MLP (c_fc, c_proj) layers
 
 ### 2. Contrastive Knowledge Consolidation (CKC)
 ✅ Novel loss that creates 2N² pairs:
@@ -211,21 +215,62 @@ python scripts/test_implementation.py
 
 ---
 
-## 📊 Expected Performance
+## 📊 Measured Performance
 
-Based on paper results, this implementation should achieve:
+### Training Setup
+- **Hardware**: NVIDIA RTX 3050 6GB Laptop GPU, Intel i5-12450H, 16GB RAM
+- **Tasks**: Flowers102 → Oxford Pets → Simpsons (3 tasks × 40 epochs)
+- **Training time**: ~48 hours total
+- **Trainable params**: 3.44M (2.3% of 149M base model)
 
-### Image-Text Retrieval (8 datasets average)
-- **I2T Recall@1**: ~40-45%
-- **T2I Recall@1**: ~37-42%
+### Full Accuracy Progression
 
-### Zero-Shot Classification
+| Stage | Flowers102 | Oxford Pets | Simpsons |
+|-------|-----------|-------------|----------|
+| Pretrained CLIP (wrong GELU) | 63.36% | 85.02% | 51.45% |
+| Pretrained CLIP (correct QuickGELU) | 69.63% | 88.72% | 61.58% |
+| 1st Training Run (buggy, = baseline) | 69.63% | 88.72% | 61.58% |
+| **After Task 0 (Flowers)** | **99.43%** | 85.47% | 51.16% |
+| **After Task 1 (Pets)** | **99.19%** | **95.85%** | 53.27% |
+| **Final (After Task 2, Simpsons)** | **84.69%** | **91.88%** | **98.12%** |
+
+### Key Metrics
+- **Final avg zero-shot accuracy (Last)**: 91.56% (+18.25% over baseline)
+- **Average (all steps × all domains)**: 84.34%
+- **Transfer (zero-shot on unseen domains)**: 63.30% (degradation: -7.33% vs pretrained)
+- **Backward Transfer (BWT)**: -9.36%
+- **Forward Transfer (FWT)**: -5.78%
+- **Average Forgetting (AF)**: 9.36%
+- **Avg Incremental Accuracy (AIA)**: 96.17%
+- **Max forgetting**: -14.74% (Flowers, after Simpsons training)
+- **All tasks above pretrained baseline**: Yes
+
+### Evaluation Commands
+
+```bash
+# Evaluate per-task checkpoints
+python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_0.pt --config configs/real_datasets_config.yaml --output results/task0_accuracy.json
+python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_1.pt --config configs/real_datasets_config.yaml --output results/task1_accuracy.json
+python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml --output results/final_accuracy.json
+
+# Compute all metrics (paper + traditional CL)
+python scripts/compute_all_metrics.py
+
+# Generate PDF report
+python scripts/generate_report.py
+```
+
+> See [METRICS_ANALYSIS.md](METRICS_ANALYSIS.md) for detailed metric definitions, formulas, and interpretation.
+
+### Previous Expected Performance (paper targets)
+
+Image-Text Retrieval (8 datasets average):
+- **I2T Recall@1**: ~40-45% | **T2I Recall@1**: ~37-42%
+
+Zero-Shot Classification:
 - **ImageNet degradation**: <10% after 8 tasks
-- **Positive backward transfer**: Old tasks improve
 
-### Comparison to Baselines
-- Outperforms ZSCL by +9.58% on retrieval
-- Outperforms EWC by ~20% on zero-shot
+Note: Paper uses retrieval metrics on 8 different datasets. Our setup uses zero-shot classification on 3 datasets, making direct comparison difficult.
 
 ---
 
@@ -323,10 +368,11 @@ This implementation is suitable for:
 1. ✅ All core components implemented
 2. ✅ Testing suite validated
 3. ✅ Documentation complete
-4. 🎯 **Your turn**: Prepare your data and start training!
-
-**Need help?** Check README.md or open an issue!
+4. ✅ Trained on 3 real datasets (Flowers102, Oxford Pets, Simpsons)
+5. ✅ Evaluated with full accuracy progression tracking
+6. ✅ Comprehensive PDF report generated (results/CCLIP_Implementation_Report.pdf)
+7. 🎯 **Potential improvements**: More datasets, task-adaptive integration_coeff, ViT-L/14
 
 ---
 
-**Status**: 🟢 **Implementation Complete & Ready to Use**
+**Status**: 🟢 **Implementation Complete, Trained & Evaluated**
