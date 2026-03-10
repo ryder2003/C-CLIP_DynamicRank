@@ -34,7 +34,10 @@ env/
 *.ckpt
 
 # Research papers (PDFs in repo root)
+*.tex
 *.pdf
+*.md
+report_materials/
 
 # Generated report code
 scripts/generate_report.py
