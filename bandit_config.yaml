@@ -1,0 +1,101 @@
+# C-CLIP with MAB Dynamic Rank Selection — config
+# Copy of default_config.yaml with an added [bandit] section
+
+model:
+  clip_model_name: "ViT-B-16"
+  pretrained: "openai"
+  # NOTE: lora_r is NO LONGER used — the bandit chooses rank per task.
+  # lora_alpha is kept but set dynamically (2 * chosen_rank).
+  lora_alpha: 32          # used as a base; overridden to 2*r each task
+  lora_dropout: 0.1
+  lora_target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "c_fc"
+    - "c_proj"
+  integration_coeff: 0.7  # merging coefficient after each task
+
+# ── Multi-Armed Bandit configuration ──────────────────────────────────────────
+bandit:
+  # Arms: discrete rank values the bandit can choose from
+  rank_choices: [4, 8, 16, 32]
+
+  # Algorithm: 'ucb1' | 'epsilon_greedy' | 'thompson'
+  #   ucb1          — best when tasks are few (strong theoretical guarantees)
+  #   thompson      — best when >10 tasks, naturally Bayesian
+  #   epsilon_greedy— simple baseline, annealed epsilon
+  algorithm: "ucb1"
+
+  # Reward weights (must sum to 1.0)
+  # plasticity_w: reward for doing well on the NEW task
+  # stability_w : reward for retaining knowledge on previous tasks / zero-shot
+  plasticity_w: 0.6
+  stability_w: 0.4
+
+  # UCB1 exploration constant (higher = more exploration)
+  ucb_c: 2.0
+
+  # Epsilon-greedy params (only used if algorithm = epsilon_greedy)
+  epsilon: 0.3
+  epsilon_decay: 0.85   # epsilon *= decay after each task
+
+  # Persist bandit state across runs (useful for long experiments)
+  # Set to null to disable persistence
+  save_path: "checkpoints/bandit_state.json"
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  batch_size: 64
+  accumulate_grad_batches: 4      # effective batch = 256
+  epochs_per_task: 40
+  base_lr: 0.0002                 # 2e-4 for LoRA params
+  text_lr_multiplier: 5           # text LR = base_lr * 5
+  weight_decay: 0.01
+  warmup_epochs: 3
+  optimizer: "adamw"
+  beta1: 0.9
+  beta2: 0.99
+  temperature: 0.07
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+data:
+  image_size: 224
+  max_text_length: 77
+  num_workers: 4
+
+# ── Datasets (continual learning sequence) ────────────────────────────────────
+datasets:
+  - name: "flowers102"
+    train_path: "data/flowers102/train.csv"
+    val_path: "data/flowers102/val.csv"
+    image_dir: "data/flowers102/images"
+    type: "classification"
+    class_names_path: "data/flowers102/class_names.txt"
+
+  - name: "oxford_pets"
+    train_path: "data/oxford_pets/train.csv"
+    val_path: "data/oxford_pets/val.csv"
+    image_dir: "data/oxford_pets/images"
+    type: "classification"
+    class_names_path: "data/oxford_pets/class_names.txt"
+
+  - name: "simpsons"
+    train_path: "data/simpsons/train.csv"
+    val_path: "data/simpsons/val.csv"
+    image_dir: "data/simpsons/images"
+    type: "classification"
+    class_names_path: "data/simpsons/class_names.txt"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  project_name: "c-clip-bandit"
+  experiment_name: "mab_rank_selection"
+  log_every_n_steps: 50
+  checkpoint_dir: "checkpoints/bandit_run"
+  use_wandb: false
+
+# ── Hardware ──────────────────────────────────────────────────────────────────
+hardware:
+  accelerator: "gpu"
+  devices: 1
+  precision: "16-mixed"
