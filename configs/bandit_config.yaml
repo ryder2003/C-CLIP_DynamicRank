@@ -28,14 +28,14 @@ model:
     - "v_proj"
     - "c_fc"
     - "c_proj"
-  integration_coeff: 0.7
+  integration_coeff: 0.3
 
 # ── Multi-Armed Bandit configuration ──────────────────────────────────────
 bandit:
   rank_choices: [4, 8, 16, 32]
   algorithm: "ucb1"             # ucb1 | epsilon_greedy | thompson
-  plasticity_w: 0.6
-  stability_w: 0.4
+  plasticity_w: 0.3
+  stability_w: 0.7
   ucb_c: 2.0
   epsilon: 0.3
   epsilon_decay: 0.85

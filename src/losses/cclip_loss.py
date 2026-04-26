@@ -202,8 +202,8 @@ class CCLIPLoss(nn.Module):
                 old_text_features=old_text_features,
             )
         
-        # Total loss
-        total_loss = clip_loss_value + ckc_loss_value
+        # Total loss: Boost CKC loss weight to heavily penalize catastrophic forgetting
+        total_loss = clip_loss_value + (2.0 * ckc_loss_value)
         
         return {
             'total_loss': total_loss,
