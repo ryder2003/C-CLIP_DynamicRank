@@ -47,8 +47,8 @@ scripts/compute_all_metrics.py
 datasets/
 simpsons_archive/
 
-# Prepared data CSVs
-data/
+# Prepared data CSVs (root-level only — NOT src/data/ which is Python code!)
+/data/
 
 # Checkpoints
 checkpoints/

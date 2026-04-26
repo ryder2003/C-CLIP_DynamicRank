@@ -127,6 +127,30 @@ class CCLIPWithBandit(nn.Module):
     #  Task lifecycle                                                      #
     # ------------------------------------------------------------------ #
 
+    def _strip_existing_lora(self, model: nn.Module):
+        """
+        Remove any leftover LoRA wrappers from the model tree.
+        Replaces LoRAForAttn → bare nn.MultiheadAttention,
+                 LoRALayer   → bare nn.Linear.
+        Called before inject_lora to guarantee a clean tree.
+        """
+        replacements = []
+        for name, module in model.named_modules():
+            if isinstance(module, LoRAForAttn):
+                replacements.append((name, module.original_attn))
+            elif isinstance(module, LoRALayer):
+                replacements.append((name, module.original_layer))
+
+        for name, replacement in replacements:
+            parts = name.split('.')
+            parent_path = '.'.join(parts[:-1])
+            attr_name = parts[-1]
+            parent = model.get_submodule(parent_path) if parent_path else model
+            setattr(parent, attr_name, replacement)
+
+        if replacements:
+            print(f"  Stripped {len(replacements)} leftover LoRA wrappers")
+
     def inject_lora_for_new_task(self, task_idx: int, task_name: str = "") -> int:
         """
         Ask the bandit which rank to use, then inject LoRA with that rank.
@@ -163,10 +187,14 @@ class CCLIPWithBandit(nn.Module):
             nn.init.eye_(self.text_projector.projection.weight)
             nn.init.zeros_(self.text_projector.projection.bias)
 
-        # 3. Freeze base model
+        # 3. Strip any leftover LoRA wrappers (safety net)
+        self._strip_existing_lora(self.clip.model)
+        self.lora_layers = {}
+
+        # 4. Freeze base model
         self.clip.freeze_base_model()
 
-        # 4. Inject LoRA into vision encoder
+        # 5. Inject LoRA into vision encoder
         vision_lora = inject_lora(
             model=self.clip.model.visual,
             target_modules=self.lora_target_modules,
@@ -175,7 +203,7 @@ class CCLIPWithBandit(nn.Module):
             lora_dropout=self.lora_dropout,
         )
 
-        # 5. Inject LoRA into text encoder
+        # 6. Inject LoRA into text encoder
         text_lora = inject_lora(
             model=self.clip.model.transformer,
             target_modules=self.lora_target_modules,

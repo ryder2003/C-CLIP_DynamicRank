@@ -257,13 +257,20 @@ def inject_lora(
     linear_targets = [t for t in target_modules if t not in ('q_proj', 'v_proj')]
 
     for name, module in list(model.named_modules()):
+        # ── GUARD: skip modules that live INSIDE existing LoRA wrappers ──
+        # named_modules() recurses into LoRAForAttn.original_attn and
+        # LoRALayer.original_layer, which are bare MHA/Linear.  Without
+        # this check, inject_lora wraps them again on the next task, creating
+        # nested chains (original_attn.original_attn.original_attn...).
+        if 'original_attn' in name or 'original_layer' in name:
+            continue
+
+        # Also skip if this module IS already a LoRA wrapper
+        if isinstance(module, (LoRAForAttn, LoRALayer)):
+            continue
+
         # ── Case 1: packed QKV (wrap MultiheadAttention for Q/V LoRA) ─────
         if wants_qv and isinstance(module, nn.MultiheadAttention):
-            # Skip if already wrapped
-            if any(isinstance(child, LoRAForAttn)
-                   for child in module.children()):
-                continue
-
             parent_name = '.'.join(name.split('.')[:-1])
             attr_name   = name.split('.')[-1]
             parent      = model.get_submodule(parent_name) if parent_name else model

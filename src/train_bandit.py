@@ -251,23 +251,36 @@ def train_with_bandit(config_path: Optional[str] = None):
     # ---- Build model with bandit ----
     model = build_cclip_with_bandit(config, device=device).to(device)
 
-    # ---- Data module (reuse existing) ----
-    try:
-        from src.data.datasets import ContinualLearningDataModule
-        data_module = ContinualLearningDataModule(
-            dataset_configs=config['datasets'],
-            tokenizer=model.clip.tokenizer,
-            batch_size=config['training']['batch_size'],
-            num_workers=config['data']['num_workers'],
-            image_size=config['data']['image_size'],
-            max_text_length=config['data']['max_text_length'],
-        )
-        data_module.setup()
-        has_data_module = True
-    except (ImportError, Exception) as e:
-        print(f"WARNING: Could not initialise data module — {e}")
-        print("You must supply dataloaders manually.")
-        has_data_module = False
+    # ---- Validate data files exist ----
+    print("\nValidating dataset CSV files...")
+    missing_files = []
+    for ds_cfg in config['datasets']:
+        for key in ['train_path', 'val_path']:
+            fpath = ds_cfg.get(key, '')
+            if not os.path.exists(fpath):
+                missing_files.append(fpath)
+    if missing_files:
+        print("\n" + "=" * 60)
+        print("ERROR: The following data CSV files are missing:")
+        for f in missing_files:
+            print(f"  ✗ {f}")
+        print("\nYou must run the data preparation script first:")
+        print("  python scripts/prepare_real_datasets.py")
+        print("=" * 60)
+        sys.exit(1)
+    print("  All CSV files found ✓")
+
+    # ---- Data module ----
+    from src.data.datasets import ContinualLearningDataModule
+    data_module = ContinualLearningDataModule(
+        dataset_configs=config['datasets'],
+        tokenizer=model.clip.tokenizer,
+        batch_size=config['training']['batch_size'],
+        num_workers=config['data']['num_workers'],
+        image_size=config['data']['image_size'],
+        max_text_length=config['data']['max_text_length'],
+    )
+    data_module.setup()
 
     checkpoint_dir = config['logging']['checkpoint_dir']
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -303,10 +316,6 @@ def train_with_bandit(config_path: Optional[str] = None):
         # ----- 1. Bandit selects rank & injects LoRA -----
         chosen_rank = model.inject_lora_for_new_task(task_idx, task_name)
         rank_chosen_per_task[task_idx] = chosen_rank
-
-        if not has_data_module:
-            print(f"Skipping training for task {task_idx} (no data module)")
-            continue
 
         data_module.set_task(task_idx)
 
