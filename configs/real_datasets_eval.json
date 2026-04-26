@@ -1,28 +1,42 @@
 {
-  "checkpoint_path": "checkpoints/real_datasets/model_final.pt",
-  "config_path": "configs/real_datasets_config.yaml",
-  "output_path": "results/real_datasets_eval.json",
+  "checkpoint_path": "checkpoints/bandit_run/model_final_bandit.pt",
+  "config_path": "bandit_config.yaml",
+  "output_path": "results/bandit_eval.json",
 
-  "note": "These are classification datasets. Use eval_zero_shot.py for accuracy metrics. Retrieval metrics are only meaningful for datasets with unique per-image captions (Flickr30k, MSCOCO).",
+  "note": "Use scripts/eval_bandit.py for zero-shot classification evaluation.",
 
-  "zero_shot_eval_command": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml",
+  "eval_command": "python scripts/eval_bandit.py --checkpoint checkpoints/bandit_run/model_final_bandit.pt --config bandit_config.yaml --output results/bandit_eval.json",
 
   "per_task_eval_commands": {
-    "after_task_0": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_0.pt --config configs/real_datasets_config.yaml --output results/task0_accuracy.json",
-    "after_task_1": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_1.pt --config configs/real_datasets_config.yaml --output results/task1_accuracy.json",
-    "final": "python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml --output results/final_accuracy.json"
-  },
-
-  "latest_results_summary": {
-    "pretrained_baseline": {"flowers102": 69.63, "oxford_pets": 88.72, "simpsons": 61.58},
-    "after_task_0": {"flowers102": 99.43, "oxford_pets": 85.47, "simpsons": 51.16},
-    "after_task_1": {"flowers102": 99.19, "oxford_pets": 95.85, "simpsons": 53.27},
-    "final": {"flowers102": 84.69, "oxford_pets": 91.88, "simpsons": 98.12},
-    "avg_final_accuracy": 91.56,
-    "backward_transfer": -9.36
+    "after_task_0": "python scripts/eval_bandit.py --checkpoint checkpoints/bandit_run/model_after_task_0_r*.pt --config bandit_config.yaml --output results/task0_accuracy.json",
+    "after_task_1": "python scripts/eval_bandit.py --checkpoint checkpoints/bandit_run/model_after_task_1_r*.pt --config bandit_config.yaml --output results/task1_accuracy.json",
+    "after_task_2": "python scripts/eval_bandit.py --checkpoint checkpoints/bandit_run/model_after_task_2_r*.pt --config bandit_config.yaml --output results/task2_accuracy.json",
+    "after_task_3": "python scripts/eval_bandit.py --checkpoint checkpoints/bandit_run/model_after_task_3_r*.pt --config bandit_config.yaml --output results/task3_accuracy.json",
+    "final": "python scripts/eval_bandit.py --checkpoint checkpoints/bandit_run/model_final_bandit.pt --config bandit_config.yaml --output results/final_accuracy.json"
   },
 
   "eval_datasets": [
+    {
+      "name": "fgvc_aircraft",
+      "type": "zero_shot_classification",
+      "val_csv": "data/fgvc_aircraft/val.csv",
+      "image_dir": "datasets/fgvc_aircraft/images",
+      "n_classes": 100
+    },
+    {
+      "name": "dtd",
+      "type": "zero_shot_classification",
+      "val_csv": "data/dtd/val.csv",
+      "image_dir": "datasets/dtd/images",
+      "n_classes": 47
+    },
+    {
+      "name": "eurosat",
+      "type": "zero_shot_classification",
+      "val_csv": "data/eurosat/val.csv",
+      "image_dir": "datasets/eurosat",
+      "n_classes": 10
+    },
     {
       "name": "flowers102",
       "type": "zero_shot_classification",
@@ -36,13 +50,6 @@
       "val_csv": "data/oxford_pets/val.csv",
       "image_dir": "datasets/Oxford_IIITPets/images",
       "n_classes": 37
-    },
-    {
-      "name": "simpsons",
-      "type": "zero_shot_classification",
-      "val_csv": "data/simpsons/val.csv",
-      "image_dir": "datasets/simpsons_archive/simpsons_dataset",
-      "n_classes": 43
     }
   ]
 }

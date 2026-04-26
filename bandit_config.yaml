@@ -1,101 +1,108 @@
-# C-CLIP with MAB Dynamic Rank Selection — config
-# Copy of default_config.yaml with an added [bandit] section
+# C-CLIP with MAB Dynamic Rank Selection — 5-Task Benchmark
+#
+# Uses 5 datasets from the CoDyRA benchmark (available on server):
+#   0. fgvc_aircraft   — fine-grained aircraft variants (100 classes)
+#   1. dtd             — describable textures (47 classes)
+#   2. eurosat         — satellite imagery (10 classes)
+#   3. flowers102      — fine-grained flowers (102 classes)
+#   4. oxford_pets     — fine-grained animals (37 classes)
+#
+# Bandit setup: 4 arms + 5 tasks
+#   - Tasks 0-3: forced exploration (one pull per arm)
+#   - Task 4: first exploitative pull using UCB1
+#
+# Run:
+#   python scripts/prepare_real_datasets.py   # prepare data CSVs first
+#   python src/train_bandit.py --config bandit_config.yaml
 
+# ── Model ──────────────────────────────────────────────────────────────────
 model:
   clip_model_name: "ViT-B-16"
   pretrained: "openai"
-  # NOTE: lora_r is NO LONGER used — the bandit chooses rank per task.
-  # lora_alpha is kept but set dynamically (2 * chosen_rank).
-  lora_alpha: 32          # used as a base; overridden to 2*r each task
+  # lora_r is NOT used — the bandit chooses rank per task.
+  # lora_alpha is dynamic: set to 2 * chosen_rank each task.
+  lora_alpha: 32
   lora_dropout: 0.1
   lora_target_modules:
     - "q_proj"
     - "v_proj"
     - "c_fc"
     - "c_proj"
-  integration_coeff: 0.7  # merging coefficient after each task
+  integration_coeff: 0.7
 
-# ── Multi-Armed Bandit configuration ──────────────────────────────────────────
+# ── Multi-Armed Bandit configuration ──────────────────────────────────────
 bandit:
-  # Arms: discrete rank values the bandit can choose from
   rank_choices: [4, 8, 16, 32]
-
-  # Algorithm: 'ucb1' | 'epsilon_greedy' | 'thompson'
-  #   ucb1          — best when tasks are few (strong theoretical guarantees)
-  #   thompson      — best when >10 tasks, naturally Bayesian
-  #   epsilon_greedy— simple baseline, annealed epsilon
-  algorithm: "ucb1"
-
-  # Reward weights (must sum to 1.0)
-  # plasticity_w: reward for doing well on the NEW task
-  # stability_w : reward for retaining knowledge on previous tasks / zero-shot
+  algorithm: "ucb1"             # ucb1 | epsilon_greedy | thompson
   plasticity_w: 0.6
   stability_w: 0.4
-
-  # UCB1 exploration constant (higher = more exploration)
   ucb_c: 2.0
-
-  # Epsilon-greedy params (only used if algorithm = epsilon_greedy)
   epsilon: 0.3
-  epsilon_decay: 0.85   # epsilon *= decay after each task
+  epsilon_decay: 0.85
+  save_path: "checkpoints/bandit_run/bandit_state.json"
 
-  # Persist bandit state across runs (useful for long experiments)
-  # Set to null to disable persistence
-  save_path: "checkpoints/bandit_state.json"
-
-# ── Training ──────────────────────────────────────────────────────────────────
+# ── Training ──────────────────────────────────────────────────────────────
 training:
   batch_size: 64
   accumulate_grad_batches: 4      # effective batch = 256
-  epochs_per_task: 40
-  base_lr: 0.0002                 # 2e-4 for LoRA params
-  text_lr_multiplier: 5           # text LR = base_lr * 5
+  epochs_per_task: 20             # 20 epochs × 5 tasks = 100 total epochs
+  base_lr: 0.0002
+  text_lr_multiplier: 5
   weight_decay: 0.01
-  warmup_epochs: 3
+  warmup_epochs: 2                # ~10% warmup ratio
   optimizer: "adamw"
   beta1: 0.9
   beta2: 0.99
   temperature: 0.07
 
-# ── Data ─────────────────────────────────────────────────────────────────────
+# ── Data ─────────────────────────────────────────────────────────────────
 data:
   image_size: 224
   max_text_length: 77
-  num_workers: 4
+  num_workers: 4                  # Linux server
 
-# ── Datasets (continual learning sequence) ────────────────────────────────────
+# ── Datasets (5-task benchmark) ───────────────────────────────────────────
 datasets:
+  # Task 0: FGVC Aircraft (fine-grained, ~10K images)
+  - name: "fgvc_aircraft"
+    train_path: "data/fgvc_aircraft/train.csv"
+    val_path: "data/fgvc_aircraft/val.csv"
+    image_dir: "datasets/fgvc_aircraft/images"
+
+  # Task 1: DTD (textures, ~5K images)
+  - name: "dtd"
+    train_path: "data/dtd/train.csv"
+    val_path: "data/dtd/val.csv"
+    image_dir: "datasets/dtd/images"
+
+  # Task 2: EuroSAT (satellite, ~27K images)
+  - name: "eurosat"
+    train_path: "data/eurosat/train.csv"
+    val_path: "data/eurosat/val.csv"
+    image_dir: "datasets/eurosat"
+
+  # Task 3: Oxford Flowers-102 (fine-grained, ~8K images)
   - name: "flowers102"
     train_path: "data/flowers102/train.csv"
     val_path: "data/flowers102/val.csv"
-    image_dir: "data/flowers102/images"
-    type: "classification"
-    class_names_path: "data/flowers102/class_names.txt"
+    image_dir: "datasets/102flowers/jpg"
 
+  # Task 4: Oxford-IIIT Pets (fine-grained, ~7K images)
   - name: "oxford_pets"
     train_path: "data/oxford_pets/train.csv"
     val_path: "data/oxford_pets/val.csv"
-    image_dir: "data/oxford_pets/images"
-    type: "classification"
-    class_names_path: "data/oxford_pets/class_names.txt"
+    image_dir: "datasets/Oxford_IIITPets/images"
 
-  - name: "simpsons"
-    train_path: "data/simpsons/train.csv"
-    val_path: "data/simpsons/val.csv"
-    image_dir: "data/simpsons/images"
-    type: "classification"
-    class_names_path: "data/simpsons/class_names.txt"
-
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────
 logging:
   project_name: "c-clip-bandit"
-  experiment_name: "mab_rank_selection"
+  experiment_name: "mab_5task_ucb1"
   log_every_n_steps: 50
   checkpoint_dir: "checkpoints/bandit_run"
   use_wandb: false
 
-# ── Hardware ──────────────────────────────────────────────────────────────────
+# ── Hardware ──────────────────────────────────────────────────────────────
 hardware:
-  accelerator: "gpu"
+  accelerator: "auto"
   devices: 1
   precision: "16-mixed"

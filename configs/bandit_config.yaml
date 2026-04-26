@@ -1,27 +1,19 @@
-# C-CLIP with MAB Dynamic Rank Selection — 10-Task CoDyRA Benchmark
+# C-CLIP with MAB Dynamic Rank Selection — 5-Task Benchmark
 #
-# Uses the EXACT 10-dataset MTIL benchmark from the CoDyRA paper:
-#   "Adaptive Rank, Reduced Forgetting: Knowledge Retention in
-#    Continual Learning VLMs with Dynamic Rank-Selective LoRA"
+# Uses 5 datasets from the CoDyRA benchmark (available on server):
+#   0. fgvc_aircraft   — fine-grained aircraft variants (100 classes)
+#   1. dtd             — describable textures (47 classes)
+#   2. eurosat         — satellite imagery (10 classes)
+#   3. flowers102      — fine-grained flowers (102 classes)
+#   4. oxford_pets     — fine-grained animals (37 classes)
 #
-# Task sequence (following CoDyRA / CoOp ordering):
-#   0. fgvc_aircraft   — fine-grained aircraft (100 classes)
-#   1. caltech101      — general object recognition (101 classes)
-#   2. dtd             — textures (47 classes)
-#   3. eurosat         — satellite imagery (10 classes)
-#   4. flowers102      — fine-grained flowers (102 classes)
-#   5. food101         — food recognition (101 classes)
-#   6. mnist           — handwritten digits (10 classes)
-#   7. oxford_pets     — fine-grained animals (37 classes)
-#   8. stanford_cars   — fine-grained vehicles (196 classes)
-#   9. sun397          — scene recognition (397 classes)
-#
-# With 4 arms and 10 tasks:
+# Bandit setup: 4 arms + 5 tasks
 #   - Tasks 0-3: forced exploration (one pull per arm)
-#   - Tasks 4-9: UCB1 exploitation (6 pulls with reward signal)
+#   - Task 4: first exploitative pull using UCB1
 #
 # Run:
-#   python src/train_bandit.py --config configs/bandit_config.yaml
+#   python scripts/prepare_real_datasets.py   # prepare data CSVs first
+#   python src/train_bandit.py --config bandit_config.yaml
 
 # ── Model ──────────────────────────────────────────────────────────────────
 model:
@@ -53,11 +45,11 @@ bandit:
 training:
   batch_size: 64
   accumulate_grad_batches: 4      # effective batch = 256
-  epochs_per_task: 40
+  epochs_per_task: 20             # 20 epochs × 5 tasks = 100 total epochs
   base_lr: 0.0002
   text_lr_multiplier: 5
   weight_decay: 0.01
-  warmup_epochs: 3
+  warmup_epochs: 2                # ~10% warmup ratio
   optimizer: "adamw"
   beta1: 0.9
   beta2: 0.99
@@ -67,74 +59,44 @@ training:
 data:
   image_size: 224
   max_text_length: 77
-  num_workers: 2                  # 2 for Windows; increase to 4 on Linux
+  num_workers: 4                  # Linux server
 
-# ── Datasets (10-task CoDyRA benchmark) ───────────────────────────────────
+# ── Datasets (5-task benchmark) ───────────────────────────────────────────
 datasets:
-  # Task 0: FGVC Aircraft
+  # Task 0: FGVC Aircraft (fine-grained, ~10K images)
   - name: "fgvc_aircraft"
     train_path: "data/fgvc_aircraft/train.csv"
     val_path: "data/fgvc_aircraft/val.csv"
-    image_dir: "datasets/fgvc_aircraft"
+    image_dir: "datasets/fgvc_aircraft/images"
 
-  # Task 1: Caltech-101
-  - name: "caltech101"
-    train_path: "data/caltech101/train.csv"
-    val_path: "data/caltech101/val.csv"
-    image_dir: "datasets/caltech101"
-
-  # Task 2: DTD (Describable Textures)
+  # Task 1: DTD (textures, ~5K images)
   - name: "dtd"
     train_path: "data/dtd/train.csv"
     val_path: "data/dtd/val.csv"
-    image_dir: "datasets/dtd"
+    image_dir: "datasets/dtd/images"
 
-  # Task 3: EuroSAT
+  # Task 2: EuroSAT (satellite, ~27K images)
   - name: "eurosat"
     train_path: "data/eurosat/train.csv"
     val_path: "data/eurosat/val.csv"
     image_dir: "datasets/eurosat"
 
-  # Task 4: Oxford Flowers-102
+  # Task 3: Oxford Flowers-102 (fine-grained, ~8K images)
   - name: "flowers102"
     train_path: "data/flowers102/train.csv"
     val_path: "data/flowers102/val.csv"
     image_dir: "datasets/102flowers/jpg"
 
-  # Task 5: Food-101
-  - name: "food101"
-    train_path: "data/food101/train.csv"
-    val_path: "data/food101/val.csv"
-    image_dir: "datasets/food101"
-
-  # Task 6: MNIST
-  - name: "mnist"
-    train_path: "data/mnist/train.csv"
-    val_path: "data/mnist/val.csv"
-    image_dir: "datasets/mnist/images"
-
-  # Task 7: Oxford-IIIT Pets
+  # Task 4: Oxford-IIIT Pets (fine-grained, ~7K images)
   - name: "oxford_pets"
     train_path: "data/oxford_pets/train.csv"
     val_path: "data/oxford_pets/val.csv"
     image_dir: "datasets/Oxford_IIITPets/images"
 
-  # Task 8: Stanford Cars
-  - name: "stanford_cars"
-    train_path: "data/stanford_cars/train.csv"
-    val_path: "data/stanford_cars/val.csv"
-    image_dir: "datasets/stanford_cars"
-
-  # Task 9: SUN397
-  - name: "sun397"
-    train_path: "data/sun397/train.csv"
-    val_path: "data/sun397/val.csv"
-    image_dir: "datasets/sun397"
-
 # ── Logging ───────────────────────────────────────────────────────────────
 logging:
   project_name: "c-clip-bandit"
-  experiment_name: "mab_10task_codyra_ucb1"
+  experiment_name: "mab_5task_ucb1"
   log_every_n_steps: 50
   checkpoint_dir: "checkpoints/bandit_run"
   use_wandb: false

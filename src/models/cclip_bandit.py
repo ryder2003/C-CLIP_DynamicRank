@@ -231,12 +231,12 @@ class CCLIPWithBandit(nn.Module):
             zeroshot_retention  : zero-shot on reference set after training   (0-1)
             zeroshot_baseline   : zero-shot on reference set before training  (0-1)
         """
-        # Optionally incorporate LoRA utilisation (DoRA insight):
-        # if some rank components are barely contributing, a smaller rank
-        # might have been sufficient → penalise over-provisioning slightly
-        utilisation = self.compute_lora_utilisation()
+        # Use pre-computed utilisation from extra_info if available
+        # (compute_lora_utilisation() would return 1.0 if called after merge)
         if extra_info is None:
             extra_info = {}
+        utilisation = extra_info.get("lora_utilisation_pre_merge",
+                                     self.compute_lora_utilisation())
         extra_info["lora_utilisation"] = utilisation
         extra_info["chosen_rank"] = rank
 

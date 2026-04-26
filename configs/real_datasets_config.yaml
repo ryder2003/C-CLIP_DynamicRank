@@ -1,34 +1,31 @@
-# C-CLIP config for the three downloaded datasets
-# Tasks run in this order: flowers102 → oxford_pets → simpsons
+# C-CLIP config for the 5 training datasets (non-bandit version)
+# Tasks run in this order: fgvc_aircraft → dtd → eurosat → flowers102 → oxford_pets
 # Run from repo root:
 #   python src/train.py --config configs/real_datasets_config.yaml
 
 # ── Model ──────────────────────────────────────────────────────────────────
 model:
-  clip_model_name: "ViT-B-16"   # smaller/faster than ViT-L; change to ViT-L-14 for paper results
+  clip_model_name: "ViT-B-16"
   pretrained: "openai"
-  lora_r: 16                    # LoRA rank (paper uses 16)
-  lora_alpha: 32                # 2 × lora_r
+  lora_r: 16
+  lora_alpha: 32
   lora_dropout: 0.1
   lora_target_modules:
-    - "q_proj"                  # attention Q projection (via packed in_proj_weight)
-    - "v_proj"                  # attention V projection (via packed in_proj_weight)
-    - "c_fc"                    # MLP first linear layer
-    - "c_proj"                  # MLP second linear layer (also out_proj alias)
-  integration_coeff: 0.7        # alpha for merging LoRA weights; 0.7 retains more learned adaptation
+    - "q_proj"
+    - "v_proj"
+    - "c_fc"
+    - "c_proj"
+  integration_coeff: 0.7
 
 # ── Training ───────────────────────────────────────────────────────────────
-# VRAM note (RTX 3050 6GB): the old 2.16 GB figure was inference-only.
-# Training requires gradients + AMP scaler + optimizer states → 3-4x more.
-# Safe training config: batch=64 + accumulate_grad_batches=4 → effective batch=256.
 training:
-  batch_size: 64                # per-step batch; effective batch = 64 × accum_grad = 4 = 256
-  accumulate_grad_batches: 4    # accumulate 4 steps before optimizer update
-  epochs_per_task: 40           # paper uses 40 epochs per task
-  base_lr: 0.0002               # 2e-4: proper LoRA fine-tuning rate
-  text_lr_multiplier: 5         # text_lr = 1e-3
-  weight_decay: 0.01            # reduced: LoRA params use weight_decay=0 (set in optimizer)
-  warmup_epochs: 3
+  batch_size: 64
+  accumulate_grad_batches: 4      # effective batch = 256
+  epochs_per_task: 20
+  base_lr: 0.0002
+  text_lr_multiplier: 5
+  weight_decay: 0.01
+  warmup_epochs: 2
   optimizer: "adamw"
   beta1: 0.9
   beta2: 0.99
@@ -38,12 +35,25 @@ training:
 data:
   image_size: 224
   max_text_length: 77
-  num_workers: 2                # 2 is safe on Windows; increase to 4 on Linux
+  num_workers: 4
 
 # ── Datasets (continual tasks) ─────────────────────────────────────────────
-# image_dir must be an absolute path OR relative to where Python is launched.
-# CSVs contain image filenames relative to image_dir.
 datasets:
+  - name: "fgvc_aircraft"
+    train_path: "data/fgvc_aircraft/train.csv"
+    val_path:   "data/fgvc_aircraft/val.csv"
+    image_dir:  "datasets/fgvc_aircraft/images"
+
+  - name: "dtd"
+    train_path: "data/dtd/train.csv"
+    val_path:   "data/dtd/val.csv"
+    image_dir:  "datasets/dtd/images"
+
+  - name: "eurosat"
+    train_path: "data/eurosat/train.csv"
+    val_path:   "data/eurosat/val.csv"
+    image_dir:  "datasets/eurosat"
+
   - name: "flowers102"
     train_path: "data/flowers102/train.csv"
     val_path:   "data/flowers102/val.csv"
@@ -54,15 +64,10 @@ datasets:
     val_path:   "data/oxford_pets/val.csv"
     image_dir:  "datasets/Oxford_IIITPets/images"
 
-  - name: "simpsons"
-    train_path: "data/simpsons/train.csv"
-    val_path:   "data/simpsons/val.csv"
-    image_dir:  "datasets/simpsons_archive/simpsons_dataset"
-
 # ── Logging & checkpoints ──────────────────────────────────────────────────
 logging:
   project_name: "c-clip-real"
-  experiment_name: "flowers_pets_simpsons"
+  experiment_name: "5task_fixed_rank"
   log_every_n_steps: 20
   save_checkpoint_every_n_epochs: 5
   checkpoint_dir: "checkpoints/real_datasets"
@@ -70,6 +75,6 @@ logging:
 
 # ── Hardware ───────────────────────────────────────────────────────────────
 hardware:
-  accelerator: "auto"           # "gpu" if CUDA available, otherwise "cpu"
+  accelerator: "auto"
   devices: 1
-  precision: "16-mixed"         # use "32" if VRAM is tight or no GPU
+  precision: "16-mixed"
