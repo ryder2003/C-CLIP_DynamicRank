@@ -154,6 +154,7 @@ class CCLIPLoss(nn.Module):
         self,
         temperature: float = 0.07,
         use_ckc: bool = True,
+        use_pretrained_anchor: bool = True,
         ckc_weight: float = 5.0,
         pretrained_distill_weight: float = 1.0,
     ):
@@ -163,6 +164,7 @@ class CCLIPLoss(nn.Module):
         self.ckc_loss = ContrastiveKnowledgeConsolidationLoss(temperature=temperature)
         self.pretrained_ckc_loss = ContrastiveKnowledgeConsolidationLoss(temperature=temperature)
         self.use_ckc = use_ckc
+        self.use_pretrained_anchor = use_pretrained_anchor
         self.ckc_weight = ckc_weight
         self.pretrained_distill_weight = pretrained_distill_weight
         
@@ -220,8 +222,9 @@ class CCLIPLoss(nn.Module):
             )
         
         # 2. CKC against original pretrained CLIP (anchor distillation)
-        #    This prevents cumulative drift across many tasks
-        if self.use_ckc and pretrained_image_features is not None:
+        #    This prevents cumulative drift across many tasks.
+        #    Uses use_pretrained_anchor (not use_ckc) so it's active from Task 0.
+        if self.use_pretrained_anchor and pretrained_image_features is not None:
             if projected_image_features is None or projected_text_features is None:
                 raise ValueError("Projected features required for pretrained anchor loss")
             

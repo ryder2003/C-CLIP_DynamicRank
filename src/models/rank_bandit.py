@@ -57,11 +57,10 @@ class RankArm:
         self.n_pulls += 1
         self.total_reward += reward
         self.rewards.append(reward)
-        # Beta distribution update: treat reward > 0.5 as 'success'
-        if reward >= 0.5:
-            self.alpha += reward          # soft update
-        else:
-            self.beta += (1.0 - reward)
+        # Correct soft Beta update — both parameters always updated.
+        # This gives proper Bayesian posterior for continuous rewards in [0,1].
+        self.alpha += reward
+        self.beta += (1.0 - reward)
 
     def to_dict(self) -> Dict:
         return {
@@ -152,9 +151,12 @@ class LoRARankBandit:
         """
         n_unpulled = sum(1 for arm in self.arms.values() if arm.n_pulls == 0)
         if n_unpulled > 0:
-            # Force-explore: pick the arm with fewest pulls
-            rank = min(self.arms, key=lambda r: self.arms[r].n_pulls)
-            strategy = "force_explore"
+            # Force-explore: pick first unpulled arm in rank_choices order.
+            # This uses the config-specified ordering (e.g. [16, 8, 32, 4])
+            # instead of dict insertion order, giving predictable assignment.
+            unpulled = [r for r in self.rank_choices if self.arms[r].n_pulls == 0]
+            rank = unpulled[0]
+            strategy = f"force_explore"
         elif self.algorithm == "ucb1":
             rank, strategy = self._ucb1_select()
         elif self.algorithm == "epsilon_greedy":

@@ -59,6 +59,7 @@ class CCLIPBanditTrainer(pl.LightningModule):
         self.criterion = CCLIPLoss(
             temperature=config['training']['temperature'],
             use_ckc=use_ckc,
+            use_pretrained_anchor=True,  # Always active, even for Task 0
             ckc_weight=config['training'].get('ckc_weight', 5.0),
             pretrained_distill_weight=config['training'].get('pretrained_distill_weight', 1.0),
         )
@@ -72,10 +73,12 @@ class CCLIPBanditTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['model'])
 
     def forward(self, images, text):
+        # Always request old features: pretrained anchor is always needed,
+        # and old_clip features will naturally be None for task 0.
         return self.model_cclip(
             images=images,
             text=text,
-            return_old_features=(self.current_task_idx > 0),
+            return_old_features=True,
         )
 
     def training_step(self, batch, batch_idx):
@@ -326,6 +329,9 @@ def train_with_bandit(config_path: Optional[str] = None, fresh: bool = False):
     # Per-task tracking for bandit reward
     rank_chosen_per_task: Dict[int, int] = {}
     task_accuracy_after: Dict[int, float] = {}
+    # Accuracy matrix R[i,j] = accuracy on task j after training on task i
+    # Keys are (task_trained, task_evaluated) tuples
+    accuracy_matrix: Dict[tuple, float] = {}
     training_start = time.time()
 
     for task_idx in range(num_tasks):
@@ -392,6 +398,8 @@ def train_with_bandit(config_path: Optional[str] = None, fresh: bool = False):
             acc = _evaluate_zero_shot(model, eval_cfg, device=device)
             if acc is not None:
                 print(f"  {eval_name}: accuracy = {acc*100:.2f}%")
+                # Store in accuracy matrix: R[task_idx, eval_idx]
+                accuracy_matrix[(task_idx, eval_idx)] = acc
                 if eval_idx == task_idx:
                     task_accuracy_after[task_idx] = acc
                 else:
@@ -469,6 +477,103 @@ def train_with_bandit(config_path: Optional[str] = None, fresh: bool = False):
     avg_final = sum(task_accuracy_after.get(i, 0) for i in range(num_tasks)) / num_tasks
     avg_baseline = sum(pretrained_zeroshot.get(config['datasets'][i]['name'], 0) for i in range(num_tasks)) / num_tasks
     print(f"  {'Average':20s}: {avg_final*100:6.2f}% (pretrained: {avg_baseline*100:.2f}%)")
+
+    # ========================================================================
+    # Continual Learning Metrics
+    # ========================================================================
+    print(f"\n{'='*60}")
+    print(f"CONTINUAL LEARNING METRICS")
+    print(f"{'='*60}")
+
+    # ---- Full Accuracy Matrix R[i,j] ----
+    # R[i][j] = accuracy on task j after training on task i
+    # We already have the final row (after all tasks).
+    # Earlier rows were logged during training. Build from accuracy_matrix.
+    print(f"\n--- Accuracy Matrix R[i,j] (row=after training task i, col=task j) ---")
+    ds_names = [config['datasets'][i]['name'] for i in range(num_tasks)]
+    header = f"{'':20s}" + "".join(f"{n:>14s}" for n in ds_names)
+    print(header)
+    for i in range(num_tasks):
+        row_label = f"After task {i} ({ds_names[i][:8]})"
+        row_vals = []
+        for j in range(num_tasks):
+            val = accuracy_matrix.get((i, j))
+            if val is not None:
+                row_vals.append(f"{val*100:13.2f}%")
+            else:
+                row_vals.append(f"{'---':>14s}")
+        print(f"{row_label:20s}" + "".join(row_vals))
+
+    # ---- Average Accuracy (A) ----
+    # A = (1/T) * sum_{j=0}^{T-1} R[T-1, j]
+    final_accs = [task_accuracy_after.get(i, 0.0) for i in range(num_tasks)]
+    avg_accuracy = sum(final_accs) / num_tasks
+    print(f"\nAverage Accuracy (A)       : {avg_accuracy*100:.2f}%")
+
+    # ---- Forgetting (F) ----
+    # F = (1/(T-1)) * sum_{j=0}^{T-2} max_{l in [j..T-2]} R[l,j] - R[T-1,j]
+    # (measures how much each task degraded from its peak)
+    if num_tasks > 1:
+        forgetting_per_task = []
+        for j in range(num_tasks - 1):  # exclude last task
+            # Find peak accuracy on task j across all checkpoints after task j was learned
+            peak = 0.0
+            for i in range(j, num_tasks - 1):  # from when task j was trained to T-2
+                val = accuracy_matrix.get((i, j))
+                if val is not None and val > peak:
+                    peak = val
+            final_val = task_accuracy_after.get(j, 0.0)
+            forgetting_per_task.append(max(0.0, peak - final_val))
+        avg_forgetting = sum(forgetting_per_task) / len(forgetting_per_task)
+        print(f"Average Forgetting (F)     : {avg_forgetting*100:.2f}%")
+        for j, f_val in enumerate(forgetting_per_task):
+            print(f"  {ds_names[j]:20s}: {f_val*100:.2f}%")
+    else:
+        print(f"Average Forgetting (F)     : N/A (single task)")
+
+    # ---- Backward Transfer (BWT) ----
+    # BWT = (1/(T-1)) * sum_{j=0}^{T-2} R[T-1, j] - R[j, j]
+    # Negative BWT = forgetting, positive = positive backward transfer
+    if num_tasks > 1:
+        bwt_per_task = []
+        for j in range(num_tasks - 1):
+            r_final = task_accuracy_after.get(j, 0.0)
+            r_diag = accuracy_matrix.get((j, j), 0.0)
+            bwt_per_task.append(r_final - r_diag)
+        avg_bwt = sum(bwt_per_task) / len(bwt_per_task)
+        print(f"\nBackward Transfer (BWT)    : {avg_bwt*100:+.2f}%")
+        for j, bwt_val in enumerate(bwt_per_task):
+            print(f"  {ds_names[j]:20s}: {bwt_val*100:+.2f}%")
+    else:
+        print(f"\nBackward Transfer (BWT)    : N/A (single task)")
+
+    # ---- Zero-shot Drop ----
+    # How much each task's final accuracy differs from pretrained zero-shot
+    print(f"\nZero-shot Drop (final vs pretrained):")
+    for i in range(num_tasks):
+        name = ds_names[i]
+        final = task_accuracy_after.get(i, 0.0)
+        baseline = pretrained_zeroshot.get(name, 0.0)
+        drop = final - baseline
+        print(f"  {name:20s}: {drop*100:+.2f}% ({final*100:.2f}% vs {baseline*100:.2f}%)")
+
+    # ---- Save metrics to JSON ----
+    metrics_report = {
+        'average_accuracy': avg_accuracy,
+        'average_forgetting': avg_forgetting if num_tasks > 1 else 0.0,
+        'backward_transfer': avg_bwt if num_tasks > 1 else 0.0,
+        'pretrained_zeroshot': pretrained_zeroshot,
+        'final_accuracies': {ds_names[i]: task_accuracy_after.get(i, 0.0) for i in range(num_tasks)},
+        'accuracy_matrix': {f"{i},{j}": v for (i, j), v in accuracy_matrix.items()},
+        'forgetting_per_task': {ds_names[j]: forgetting_per_task[j] for j in range(num_tasks - 1)} if num_tasks > 1 else {},
+        'bwt_per_task': {ds_names[j]: bwt_per_task[j] for j in range(num_tasks - 1)} if num_tasks > 1 else {},
+        'ranks_chosen': {str(k): v for k, v in rank_chosen_per_task.items()},
+    }
+    metrics_path = os.path.join(checkpoint_dir, 'cl_metrics.json')
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics_report, f, indent=2)
+    print(f"\nMetrics saved to {metrics_path}")
+
     print(f"\nContinual learning with MAB rank selection complete!")
 
 

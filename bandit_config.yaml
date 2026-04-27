@@ -8,39 +8,37 @@
 #   4. oxford_pets     — fine-grained animals (37 classes)
 #
 # Bandit setup: 4 arms + 5 tasks
-#   - Tasks 0-3: forced exploration (one pull per arm)
+#   - Tasks 0-3: forced exploration (one pull per arm, in rank_choices order)
 #   - Task 4: first exploitative pull using UCB1
 #
 # Run:
 #   python scripts/prepare_real_datasets.py   # prepare data CSVs first
-#   python src/train_bandit.py --config bandit_config.yaml
+#   python src/train_bandit.py --config bandit_config.yaml --fresh
 
 # ── Model ──────────────────────────────────────────────────────────────────
 model:
   clip_model_name: "ViT-B-16"
   pretrained: "openai"
   # lora_r is NOT used — the bandit chooses rank per task.
-  # lora_alpha is FIXED: different ranks produce different scaling factors
-  # (alpha/r), giving the bandit a genuine plasticity-stability tradeoff.
-  #   r=4  → scaling=4.0 (strong, focused adaptation)
-  #   r=8  → scaling=2.0
-  #   r=16 → scaling=1.0
-  #   r=32 → scaling=0.5 (gentle, distributed adaptation)
-  lora_alpha: 16
-  lora_dropout: 0.1
+  # lora_alpha is NOW DYNAMIC: set to 2*rank inside cclip_bandit.py
+  # This gives uniform scaling=2.0 for ALL ranks, so the bandit selects
+  # rank purely for capacity (parameter count), not scaling magnitude.
+  # The value below is a fallback only; it is overridden by the dynamic logic.
+  lora_alpha: 32
+  lora_dropout: 0.05                # was 0.1 — lower = more stable LoRA path
   lora_target_modules:
     - "q_proj"
     - "v_proj"
     - "c_fc"
     - "c_proj"
-  integration_coeff: 0.35          # was 0.7 — reduced to limit per-task drift
+  integration_coeff: 0.5            # was 0.35 — safe now that scaling is uniform at 2.0
 
 # ── Multi-Armed Bandit configuration ──────────────────────────────────────
 bandit:
-  rank_choices: [4, 8, 16, 32]
-  algorithm: "ucb1"             # ucb1 | epsilon_greedy | thompson
-  plasticity_w: 0.5             # was 0.6 — now equal weight with stability
-  stability_w: 0.5              # was 0.4 — increased to penalize forgetting more
+  rank_choices: [16, 8, 32, 4]      # reordered: aircraft gets r=16 first (moderate)
+  algorithm: "ucb1"                  # ucb1 | epsilon_greedy | thompson
+  plasticity_w: 0.4                  # was 0.5 — weight stability more
+  stability_w: 0.6                   # was 0.5 — penalize forgetting harder
   ucb_c: 2.0
   epsilon: 0.3
   epsilon_decay: 0.85
@@ -49,24 +47,24 @@ bandit:
 # ── Training ──────────────────────────────────────────────────────────────
 training:
   batch_size: 64
-  accumulate_grad_batches: 4      # effective batch = 256
-  epochs_per_task: 10             # was 20 — fewer epochs = less drift per task
-  base_lr: 0.0001                 # was 0.0002 — lower LR = more stable updates
-  text_lr_multiplier: 5
+  accumulate_grad_batches: 4         # effective batch = 256
+  epochs_per_task: 30                # was 10 — minimum for convergence on small datasets
+  base_lr: 0.00005                   # was 0.0001 — lower for stability
+  text_lr_multiplier: 3              # was 5 — text LR = 1.5e-4 (prevents text drift)
   weight_decay: 0.01
-  warmup_epochs: 2                # ~20% warmup ratio (2 of 10 epochs)
+  warmup_epochs: 3                   # ~10% warmup ratio
   optimizer: "adamw"
   beta1: 0.9
   beta2: 0.99
   temperature: 0.07
-  ckc_weight: 5.0                 # CKC loss weight against previous model
-  pretrained_distill_weight: 1.0  # anchor distillation against pretrained CLIP
+  ckc_weight: 2.0                    # was 5.0 — balance distillation vs task learning
+  pretrained_distill_weight: 1.5     # was 1.0 — slightly stronger anchor
 
 # ── Data ─────────────────────────────────────────────────────────────────
 data:
   image_size: 224
   max_text_length: 77
-  num_workers: 4                  # Linux server
+  num_workers: 4                     # Linux server
 
 # ── Datasets (5-task benchmark) ───────────────────────────────────────────
 datasets:
@@ -103,7 +101,7 @@ datasets:
 # ── Logging ───────────────────────────────────────────────────────────────
 logging:
   project_name: "c-clip-bandit"
-  experiment_name: "mab_5task_ucb1"
+  experiment_name: "mab_5task_ucb1_fixed"
   log_every_n_steps: 50
   checkpoint_dir: "checkpoints/bandit_run"
   use_wandb: false

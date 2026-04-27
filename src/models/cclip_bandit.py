@@ -176,11 +176,14 @@ class CCLIPWithBandit(nn.Module):
         chosen_rank = self.bandit.select_rank(task_idx, task_name)
         self.current_lora_r = chosen_rank
 
-        # Fixed alpha: different ranks now produce different scaling factors,
-        # giving the bandit a genuine plasticity-stability tradeoff:
-        #   r=4  → scaling = alpha/4  (strong, focused adaptation)
-        #   r=32 → scaling = alpha/32 (gentle, distributed adaptation)
-        fixed_alpha = self.lora_alpha
+        # Dynamic alpha: alpha = 2 * rank ensures scaling = 2.0 for ALL ranks.
+        # This makes the bandit choose rank purely for capacity (not scaling),
+        # and makes merge strength uniform across arms.
+        #   r=4  → alpha=8,  scaling=2.0
+        #   r=8  → alpha=16, scaling=2.0
+        #   r=16 → alpha=32, scaling=2.0
+        #   r=32 → alpha=64, scaling=2.0
+        fixed_alpha = 2 * chosen_rank
 
         print(f"[CCLIPWithBandit] Injecting LoRA with r={chosen_rank}, "
               f"alpha={fixed_alpha}, scaling={fixed_alpha/chosen_rank:.2f}")
@@ -397,9 +400,10 @@ class CCLIPWithBandit(nn.Module):
                 output['old_image_features'] = self.old_clip.encode_image(images, normalize=True)
                 output['old_text_features'] = self.old_clip.encode_text(text, normalize=True)
 
-        # Always compute pretrained anchor features for dual distillation
-        # (from task 1 onwards, when CKC is active)
-        if return_old_features and self.pretrained_clip is not None:
+        # Always compute pretrained anchor features for dual distillation.
+        # This is decoupled from return_old_features so it's active from Task 0,
+        # preventing unconstrained drift on the very first task.
+        if self.pretrained_clip is not None:
             with torch.no_grad():
                 output['pretrained_image_features'] = self.pretrained_clip.encode_image(images, normalize=True)
                 output['pretrained_text_features'] = self.pretrained_clip.encode_text(text, normalize=True)

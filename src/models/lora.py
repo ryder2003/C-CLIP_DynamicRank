@@ -83,12 +83,14 @@ class LoRALayer(nn.Module):
         # Original output
         result = self.original_layer(x)
         
-        # LoRA adaptation: x -> A -> B -> scale
+        # LoRA adaptation: x -> A -> dropout -> B -> scale
+        # Dropout is applied AFTER the first projection (standard LoRA formulation).
+        # Applying it before would zero the full input, killing the LoRA path.
         # x: (..., in_features)
         # lora_out: (..., out_features)
-        lora_out = self.lora_dropout(x)
-        lora_out = F.linear(lora_out, self.lora_A)  # (..., r)
-        lora_out = F.linear(lora_out, self.lora_B)  # (..., out_features)
+        lora_out = F.linear(x, self.lora_A)           # (..., r)
+        lora_out = self.lora_dropout(lora_out)         # dropout on intermediate
+        lora_out = F.linear(lora_out, self.lora_B)     # (..., out_features)
         lora_out = lora_out * self.scaling
         
         return result + lora_out
