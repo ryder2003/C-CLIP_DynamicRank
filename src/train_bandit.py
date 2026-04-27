@@ -59,6 +59,8 @@ class CCLIPBanditTrainer(pl.LightningModule):
         self.criterion = CCLIPLoss(
             temperature=config['training']['temperature'],
             use_ckc=use_ckc,
+            ckc_weight=config['training'].get('ckc_weight', 5.0),
+            pretrained_distill_weight=config['training'].get('pretrained_distill_weight', 1.0),
         )
 
         self.base_lr = config['training']['base_lr']
@@ -86,11 +88,14 @@ class CCLIPBanditTrainer(pl.LightningModule):
             projected_text_features=outputs['projected_text_features'],
             old_image_features=outputs.get('old_image_features'),
             old_text_features=outputs.get('old_text_features'),
+            pretrained_image_features=outputs.get('pretrained_image_features'),
+            pretrained_text_features=outputs.get('pretrained_text_features'),
         )
         metrics = compute_retrieval_metrics(outputs['image_features'], outputs['text_features'])
         self.log('train/total_loss', loss_dict['total_loss'], on_step=True, on_epoch=True, prog_bar=True)
         self.log('train/clip_loss',  loss_dict['clip_loss'],  on_step=True, on_epoch=True)
         self.log('train/ckc_loss',   loss_dict['ckc_loss'],   on_step=True, on_epoch=True)
+        self.log('train/pretrained_loss', loss_dict['pretrained_loss'], on_step=True, on_epoch=True)
         self.log('train/i2t@1', metrics['i2t_recall@1'], on_step=True, on_epoch=True)
         # Log the rank that was chosen for this task
         self.log('train/lora_rank', float(self.model_cclip.current_lora_r), on_step=False, on_epoch=True)
@@ -106,6 +111,8 @@ class CCLIPBanditTrainer(pl.LightningModule):
             projected_text_features=outputs['projected_text_features'],
             old_image_features=outputs.get('old_image_features'),
             old_text_features=outputs.get('old_text_features'),
+            pretrained_image_features=outputs.get('pretrained_image_features'),
+            pretrained_text_features=outputs.get('pretrained_text_features'),
         )
         metrics = compute_retrieval_metrics(outputs['image_features'], outputs['text_features'])
         self.log('val/total_loss', loss_dict['total_loss'], on_epoch=True, prog_bar=True)
@@ -241,12 +248,24 @@ def _evaluate_zero_shot(model, dataset_config, device='cuda'):
 # Main training loop
 # ---------------------------------------------------------------------------
 
-def train_with_bandit(config_path: Optional[str] = None):
+def train_with_bandit(config_path: Optional[str] = None, fresh: bool = False):
     torch.set_float32_matmul_precision('medium')
 
     config = load_config(config_path) if (config_path and os.path.exists(config_path)) else get_default_config()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
+
+    # ---- Handle stale bandit state ----
+    bandit_save_path = config.get('bandit', {}).get('save_path', None)
+    if fresh and bandit_save_path and os.path.exists(bandit_save_path):
+        os.remove(bandit_save_path)
+        print(f"[--fresh] Removed stale bandit state: {bandit_save_path}")
+    elif bandit_save_path and os.path.exists(bandit_save_path) and not fresh:
+        print(f"\n{'='*60}")
+        print(f"WARNING: Found existing bandit state at {bandit_save_path}")
+        print(f"  The bandit will resume from this state.")
+        print(f"  If you are starting a FRESH run, use: --fresh")
+        print(f"{'='*60}\n")
 
     # ---- Build model with bandit ----
     model = build_cclip_with_bandit(config, device=device).to(device)
@@ -382,14 +401,15 @@ def train_with_bandit(config_path: Optional[str] = None):
                 print(f"  {eval_name}: evaluation failed")
 
         # ----- 7. Update bandit with reward -----
-        # Stability: average accuracy on ALL prior tasks
+        # Collect per-task accuracies and baselines for worst-case stability
         prior_accs = [task_accuracy_after.get(i, 0.5) for i in range(task_idx)]
+        prior_baselines = [pretrained_zeroshot.get(config['datasets'][i]['name'], 0.5)
+                           for i in range(task_idx)]
         zeroshot_retention = float(sum(prior_accs) / len(prior_accs)) if prior_accs else 1.0
 
         # Baseline: pretrained zero-shot on current task
         baseline_acc = pretrained_zeroshot.get(task_name, 0.5)
-        prior_baseline = sum(pretrained_zeroshot.get(config['datasets'][i]['name'], 0.5)
-                             for i in range(task_idx)) / max(task_idx, 1)
+        prior_baseline = sum(prior_baselines) / max(len(prior_baselines), 1)
 
         model.update_bandit(
             rank=chosen_rank,
@@ -399,7 +419,11 @@ def train_with_bandit(config_path: Optional[str] = None):
             baseline_accuracy=baseline_acc,
             zeroshot_retention=zeroshot_retention,
             zeroshot_baseline=prior_baseline if task_idx > 0 else 1.0,
-            extra_info={"lora_utilisation_pre_merge": utilisation},
+            extra_info={
+                "lora_utilisation_pre_merge": utilisation,
+                "prior_task_accs": prior_accs,
+                "prior_task_baselines": prior_baselines,
+            },
         )
 
         # ----- 8. Print bandit summary -----
@@ -451,8 +475,11 @@ def train_with_bandit(config_path: Optional[str] = None):
 def main():
     parser = argparse.ArgumentParser(description='C-CLIP with MAB rank selection')
     parser.add_argument('--config', type=str, default=None)
+    parser.add_argument('--fresh', action='store_true',
+                        help='Reset bandit state and start a fresh run. '
+                             'Use this when starting training from scratch.')
     args = parser.parse_args()
-    train_with_bandit(args.config)
+    train_with_bandit(args.config, fresh=args.fresh)
 
 
 if __name__ == '__main__':

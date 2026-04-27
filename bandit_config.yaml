@@ -20,22 +20,27 @@ model:
   clip_model_name: "ViT-B-16"
   pretrained: "openai"
   # lora_r is NOT used — the bandit chooses rank per task.
-  # lora_alpha is dynamic: set to 2 * chosen_rank each task.
-  lora_alpha: 32
+  # lora_alpha is FIXED: different ranks produce different scaling factors
+  # (alpha/r), giving the bandit a genuine plasticity-stability tradeoff.
+  #   r=4  → scaling=4.0 (strong, focused adaptation)
+  #   r=8  → scaling=2.0
+  #   r=16 → scaling=1.0
+  #   r=32 → scaling=0.5 (gentle, distributed adaptation)
+  lora_alpha: 16
   lora_dropout: 0.1
   lora_target_modules:
     - "q_proj"
     - "v_proj"
     - "c_fc"
     - "c_proj"
-  integration_coeff: 0.7
+  integration_coeff: 0.35          # was 0.7 — reduced to limit per-task drift
 
 # ── Multi-Armed Bandit configuration ──────────────────────────────────────
 bandit:
   rank_choices: [4, 8, 16, 32]
   algorithm: "ucb1"             # ucb1 | epsilon_greedy | thompson
-  plasticity_w: 0.6
-  stability_w: 0.4
+  plasticity_w: 0.5             # was 0.6 — now equal weight with stability
+  stability_w: 0.5              # was 0.4 — increased to penalize forgetting more
   ucb_c: 2.0
   epsilon: 0.3
   epsilon_decay: 0.85
@@ -45,15 +50,17 @@ bandit:
 training:
   batch_size: 64
   accumulate_grad_batches: 4      # effective batch = 256
-  epochs_per_task: 20             # 20 epochs × 5 tasks = 100 total epochs
-  base_lr: 0.0002
+  epochs_per_task: 10             # was 20 — fewer epochs = less drift per task
+  base_lr: 0.0001                 # was 0.0002 — lower LR = more stable updates
   text_lr_multiplier: 5
   weight_decay: 0.01
-  warmup_epochs: 2                # ~10% warmup ratio
+  warmup_epochs: 2                # ~20% warmup ratio (2 of 10 epochs)
   optimizer: "adamw"
   beta1: 0.9
   beta2: 0.99
   temperature: 0.07
+  ckc_weight: 5.0                 # CKC loss weight against previous model
+  pretrained_distill_weight: 1.0  # anchor distillation against pretrained CLIP
 
 # ── Data ─────────────────────────────────────────────────────────────────
 data:

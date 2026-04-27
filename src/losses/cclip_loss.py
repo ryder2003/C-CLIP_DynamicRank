@@ -135,25 +135,36 @@ class ContrastiveKnowledgeConsolidationLoss(nn.Module):
 
 class CCLIPLoss(nn.Module):
     """
-    Combined C-CLIP loss: CLIP Loss + CKC Loss.
+    Combined C-CLIP loss: CLIP Loss + CKC Loss + Pretrained Anchor Loss.
     
-    Total loss: L = L_CLIP + L_CKC
+    Total loss: L = L_CLIP + ckc_w * L_CKC + pretrained_w * L_pretrained
+    
+    The dual distillation approach uses two anchors:
+      1. CKC against the PREVIOUS task model (prevents within-step forgetting)
+      2. CKC against the ORIGINAL pretrained CLIP (prevents cumulative drift)
     
     Args:
         temperature: Temperature parameter for contrastive losses
         use_ckc: Whether to use CKC loss (set False for first task)
+        ckc_weight: Weight for CKC loss against previous model (default: 5.0)
+        pretrained_distill_weight: Weight for distillation against pretrained CLIP (default: 1.0)
     """
     
     def __init__(
         self,
         temperature: float = 0.07,
         use_ckc: bool = True,
+        ckc_weight: float = 5.0,
+        pretrained_distill_weight: float = 1.0,
     ):
         super().__init__()
         
         self.clip_loss = CLIPLoss(temperature=temperature)
         self.ckc_loss = ContrastiveKnowledgeConsolidationLoss(temperature=temperature)
+        self.pretrained_ckc_loss = ContrastiveKnowledgeConsolidationLoss(temperature=temperature)
         self.use_ckc = use_ckc
+        self.ckc_weight = ckc_weight
+        self.pretrained_distill_weight = pretrained_distill_weight
         
     def forward(
         self,
@@ -163,23 +174,28 @@ class CCLIPLoss(nn.Module):
         projected_text_features: Optional[torch.Tensor] = None,
         old_image_features: Optional[torch.Tensor] = None,
         old_text_features: Optional[torch.Tensor] = None,
+        pretrained_image_features: Optional[torch.Tensor] = None,
+        pretrained_text_features: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
-        Compute total C-CLIP loss.
+        Compute total C-CLIP loss with dual distillation.
         
         Args:
             image_features: Current model image features (B, D)
             text_features: Current model text features (B, D)
             projected_image_features: Projected image features (B, D)
             projected_text_features: Projected text features (B, D)
-            old_image_features: Old model image features (B, D)
-            old_text_features: Old model text features (B, D)
+            old_image_features: Previous task model image features (B, D)
+            old_text_features: Previous task model text features (B, D)
+            pretrained_image_features: Original pretrained CLIP image features (B, D)
+            pretrained_text_features: Original pretrained CLIP text features (B, D)
             
         Returns:
             Dictionary containing:
                 - total_loss: Combined loss
                 - clip_loss: CLIP loss component
                 - ckc_loss: CKC loss component (0 if not used)
+                - pretrained_loss: Pretrained anchor loss (0 if not used)
         """
         # Compute CLIP loss on DIRECT encoder features (not projected).
         # This ensures gradients flow directly to LoRA parameters, which is
@@ -187,10 +203,11 @@ class CCLIPLoss(nn.Module):
         # Projected features are ONLY used for CKC knowledge consolidation.
         clip_loss_value = self.clip_loss(image_features, text_features)
         
-        # Compute CKC loss if enabled and old features available
         # Use a proper zero tensor that maintains gradient tracking
         ckc_loss_value = image_features.sum() * 0.0
+        pretrained_loss_value = image_features.sum() * 0.0
         
+        # 1. CKC against previous task model (task-to-task distillation)
         if self.use_ckc and old_image_features is not None:
             if projected_image_features is None or projected_text_features is None:
                 raise ValueError("Projected features required for CKC loss")
@@ -202,13 +219,29 @@ class CCLIPLoss(nn.Module):
                 old_text_features=old_text_features,
             )
         
-        # Total loss: Boost CKC loss weight to heavily penalize catastrophic forgetting
-        total_loss = clip_loss_value + (2.0 * ckc_loss_value)
+        # 2. CKC against original pretrained CLIP (anchor distillation)
+        #    This prevents cumulative drift across many tasks
+        if self.use_ckc and pretrained_image_features is not None:
+            if projected_image_features is None or projected_text_features is None:
+                raise ValueError("Projected features required for pretrained anchor loss")
+            
+            pretrained_loss_value = self.pretrained_ckc_loss(
+                projected_image_features=projected_image_features,
+                projected_text_features=projected_text_features,
+                old_image_features=pretrained_image_features,
+                old_text_features=pretrained_text_features,
+            )
+        
+        # Total loss: L = L_CLIP + ckc_w * L_CKC + pretrained_w * L_pretrained
+        total_loss = (clip_loss_value
+                      + self.ckc_weight * ckc_loss_value
+                      + self.pretrained_distill_weight * pretrained_loss_value)
         
         return {
             'total_loss': total_loss,
             'clip_loss': clip_loss_value,
             'ckc_loss': ckc_loss_value,
+            'pretrained_loss': pretrained_loss_value,
         }
 
 

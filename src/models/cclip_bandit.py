@@ -107,11 +107,21 @@ class CCLIPWithBandit(nn.Module):
         )
         self.embed_dim = self.clip.embed_dim
 
+        # Permanent frozen copy of pretrained CLIP for anchor distillation.
+        # This prevents cumulative drift: no matter how many tasks we train,
+        # the model always has a signal pulling it back towards the original
+        # pretrained zero-shot capabilities.
+        self.pretrained_clip = copy.deepcopy(self.clip)
+        self.pretrained_clip.eval()
+        for param in self.pretrained_clip.parameters():
+            param.requires_grad = False
+        print("  Stored frozen pretrained CLIP for anchor distillation")
+
         # Projectors for CKC
         self.vision_projector = Projector(self.embed_dim).to(device)
         self.text_projector = Projector(self.embed_dim).to(device)
 
-        # Old frozen model for CKC
+        # Old frozen model for CKC (task-to-task distillation)
         self.old_clip = None
 
         # LoRA layer registry
@@ -166,12 +176,14 @@ class CCLIPWithBandit(nn.Module):
         chosen_rank = self.bandit.select_rank(task_idx, task_name)
         self.current_lora_r = chosen_rank
 
-        # Dynamic alpha: scale alpha with rank so effective magnitude stays ~constant
-        # (per DoRA insight: lora_alpha / r is the actual scaling factor)
-        dynamic_alpha = 2 * chosen_rank   # keeps scaling_factor = 2.0 always
+        # Fixed alpha: different ranks now produce different scaling factors,
+        # giving the bandit a genuine plasticity-stability tradeoff:
+        #   r=4  → scaling = alpha/4  (strong, focused adaptation)
+        #   r=32 → scaling = alpha/32 (gentle, distributed adaptation)
+        fixed_alpha = self.lora_alpha
 
         print(f"[CCLIPWithBandit] Injecting LoRA with r={chosen_rank}, "
-              f"alpha={dynamic_alpha}")
+              f"alpha={fixed_alpha}, scaling={fixed_alpha/chosen_rank:.2f}")
 
         # 2. Save old model for CKC (from task 1 onwards)
         if self.current_task > 0:
@@ -199,7 +211,7 @@ class CCLIPWithBandit(nn.Module):
             model=self.clip.model.visual,
             target_modules=self.lora_target_modules,
             r=chosen_rank,
-            lora_alpha=dynamic_alpha,
+            lora_alpha=fixed_alpha,
             lora_dropout=self.lora_dropout,
         )
 
@@ -208,7 +220,7 @@ class CCLIPWithBandit(nn.Module):
             model=self.clip.model.transformer,
             target_modules=self.lora_target_modules,
             r=chosen_rank,
-            lora_alpha=dynamic_alpha,
+            lora_alpha=fixed_alpha,
             lora_dropout=self.lora_dropout,
         )
 
@@ -273,6 +285,8 @@ class CCLIPWithBandit(nn.Module):
             baseline_accuracy=baseline_accuracy,
             zeroshot_retention=zeroshot_retention,
             zeroshot_baseline=zeroshot_baseline,
+            prior_task_accs=extra_info.get("prior_task_accs"),
+            prior_task_baselines=extra_info.get("prior_task_baselines"),
         )
 
         # Optional: slight penalty if utilisation is low (rank wastage)
@@ -382,6 +396,13 @@ class CCLIPWithBandit(nn.Module):
             with torch.no_grad():
                 output['old_image_features'] = self.old_clip.encode_image(images, normalize=True)
                 output['old_text_features'] = self.old_clip.encode_text(text, normalize=True)
+
+        # Always compute pretrained anchor features for dual distillation
+        # (from task 1 onwards, when CKC is active)
+        if return_old_features and self.pretrained_clip is not None:
+            with torch.no_grad():
+                output['pretrained_image_features'] = self.pretrained_clip.encode_image(images, normalize=True)
+                output['pretrained_text_features'] = self.pretrained_clip.encode_text(text, normalize=True)
 
         return output
 

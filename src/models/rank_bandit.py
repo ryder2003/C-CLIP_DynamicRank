@@ -210,12 +210,18 @@ class LoRARankBandit:
         baseline_accuracy: float,      # pretrained zero-shot on same set [0,1]
         zeroshot_retention: float,     # current zero-shot on ref set     [0,1]
         zeroshot_baseline: float,      # pretrained zero-shot on ref set  [0,1]
+        prior_task_accs: Optional[List[float]] = None,   # per-task accs
+        prior_task_baselines: Optional[List[float]] = None,  # per-task baselines
     ) -> float:
         """
         Composite reward balancing plasticity and stability.
 
+        Uses WORST-CASE stability instead of average — this ensures that a
+        catastrophic drop on even a single prior task (e.g., aircraft 69%→8%)
+        is heavily penalised rather than masked by averaging.
+
         plasticity = how much we GAINED on the new task (relative gain)
-        stability  = how well we RETAINED zero-shot on unseen data
+        stability  = how well we RETAINED the WORST-performing prior task
 
         Both are normalised to [0,1] where 1 is perfect.
         """
@@ -227,8 +233,31 @@ class LoRARankBandit:
         else:
             plasticity = task_accuracy  # fallback
 
-        # Stability: fraction of original zero-shot retained
-        if zeroshot_baseline > 0:
+        # Stability: use WORST-CASE retention across prior tasks
+        # This prevents a single catastrophic drop from being masked
+        if prior_task_accs and prior_task_baselines:
+            # Per-task retention: how much of each prior task's pretrained accuracy we kept
+            per_task_retention = []
+            below_baseline_penalty = 0.0
+            for acc, base in zip(prior_task_accs, prior_task_baselines):
+                if base > 0:
+                    retention = min(1.0, acc / base)
+                else:
+                    retention = 1.0
+                per_task_retention.append(retention)
+                # Extra penalty if a task drops BELOW pretrained baseline
+                if acc < base:
+                    below_baseline_penalty += (base - acc) / base
+
+            # Worst-case: minimum retention across all prior tasks
+            worst_retention = min(per_task_retention)
+            avg_retention = sum(per_task_retention) / len(per_task_retention)
+            # Blend: 70% worst-case + 30% average (so it's not purely adversarial)
+            stability = 0.7 * worst_retention + 0.3 * avg_retention
+            # Apply penalty for tasks below baseline (0.1 per task that dropped)
+            stability = max(0.0, stability - 0.1 * below_baseline_penalty)
+        elif zeroshot_baseline > 0:
+            # Fallback to original average-based stability
             stability = min(1.0, zeroshot_retention / zeroshot_baseline)
         else:
             stability = 1.0
@@ -238,6 +267,9 @@ class LoRARankBandit:
         print(f"[RankBandit] Reward breakdown:")
         print(f"  Task acc     : {task_accuracy:.3f} (baseline {baseline_accuracy:.3f})")
         print(f"  Zero-shot    : {zeroshot_retention:.3f} (baseline {zeroshot_baseline:.3f})")
+        if prior_task_accs:
+            print(f"  Per-task ret : {[f'{r:.3f}' for r in per_task_retention]}")
+            print(f"  Worst-case   : {worst_retention:.3f}")
         print(f"  Plasticity   : {plasticity:.3f}  (w={self.plasticity_w})")
         print(f"  Stability    : {stability:.3f}  (w={self.stability_w})")
         print(f"  Total reward : {reward:.3f}")
@@ -272,7 +304,7 @@ class LoRARankBandit:
         }
         self.task_history.append(record)
 
-        print(f"[RankBandit] Updated arm r={rank} → mean={self.arms[rank].mean_reward:.3f}")
+        print(f"[RankBandit] Updated arm r={rank} -> mean={self.arms[rank].mean_reward:.3f}")
 
         if self.save_path:
             self._save(self.save_path)
@@ -289,7 +321,7 @@ class LoRARankBandit:
         print("  Arm statistics:")
         for r in self.rank_choices:
             arm = self.arms[r]
-            bar = "█" * int(arm.mean_reward * 20)
+            bar = "#" * int(arm.mean_reward * 20)
             print(f"    r={r:2d} | pulls={arm.n_pulls} | "
                   f"mean={arm.mean_reward:.3f} |{bar}|")
 
