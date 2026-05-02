@@ -1,141 +1,46 @@
-# Data Split and Metrics Explanation
+# Data Split Explanation
 
-## Your Question: "Does 100% Recall@10 mean training and testing on same data?"
+## Dataset Partitioning
 
-**Short Answer:** ❌ NO! The data is properly partitioned. The 100% Recall@10 is due to **small validation set size**, not data leakage or overfitting.
+All datasets in the CoDyRA 5-task benchmark use proper train/val splits with large validation sets, ensuring meaningful evaluation metrics.
 
----
+### Split Sizes
 
-## Data Partitioning (Verified ✅)
+| Dataset | Train Samples | Val Samples | Split Ratio |
+|---------|---------------|-------------|-------------|
+| FGVC Aircraft | 6,667 | 3,333 | 67/33 |
+| DTD | 3,760 | 1,880 | 67/33 |
+| EuroSAT | 22,950 | 4,050 | 85/15 |
+| Flowers102 | 2,040 | 6,149 | 25/75 |
+| Oxford Pets | 6,282 | 1,108 | 85/15 |
 
-### Task 1:
-- **Training:** 40 samples from `images/train/train_img_*.jpg`
-- **Validation:** 10 samples from `images/val/val_img_*.jpg`
+### Key Properties
 
-### Task 2:
-- **Training:** 40 samples from `images/train/train_img_*.jpg`
-- **Validation:** 10 samples from `images/val/val_img_*.jpg`
+✅ **Zero overlap** between training and validation sets
+✅ **Large validation sets** (1,000–6,000+ samples) for statistically meaningful metrics
+✅ **Class-balanced splits** where possible
+✅ **Consistent across runs** (deterministic splits from dataset-provided splits)
 
-### Evidence of Proper Split:
-```
-Training:   images/train/train_img_0000.jpg → train_img_0039.jpg (40 files)
-Validation: images/val/val_img_0000.jpg → val_img_0009.jpg (10 files)
-```
+### Evaluation Method
 
-**✅ Zero overlap between training and validation sets**
+Zero-shot classification accuracy is used as the primary metric:
 
----
+1. Encode all class names using prompt templates → class text features
+2. Encode each validation image → image features
+3. Compute cosine similarity between image and all class features
+4. Predict the class with highest similarity
+5. Report top-1 accuracy
 
-## Why Recall@10 = 100%?
+This is a **zero-shot** evaluation — no training is done on the validation set.
 
-### Mathematical Constraint
+### Baseline Validation
 
-When you have **10 samples** in validation set:
+| Dataset | Val Samples | Pretrained CLIP Accuracy | Expected Range |
+|---------|-------------|------------------------|----------------|
+| FGVC Aircraft | 3,333 | 23.97% | ✅ Expected (fine-grained, 100 classes) |
+| DTD | 1,880 | 43.99% | ✅ Expected (textures are ambiguous) |
+| EuroSAT | 4,050 | 46.86% | ✅ Expected (satellite is out-of-domain) |
+| Flowers102 | 6,149 | 67.88% | ✅ Expected (natural images, CLIP knows flowers) |
+| Oxford Pets | 1,108 | 87.27% | ✅ Expected (common animals, CLIP excels) |
 
-| Metric | Definition | Max Possible Results | Can Be Less Than 100%? |
-|--------|-----------|----------------------|------------------------|
-| **Recall@1** | Correct match in top 1 | 1 out of 10 | ✅ YES |
-| **Recall@5** | Correct match in top 5 | 5 out of 10 | ✅ YES |
-| **Recall@10** | Correct match in top 10 | 10 out of 10 (ALL) | ❌ NO - Always 100%! |
-
-### Example Scenario
-
-**Image-to-Text Retrieval:**
-- Query: 1 image
-- Database: 10 text captions (entire validation set)
-- Task: Find correct caption
-
-**Results:**
-- Correct caption ranked at position #7
-- **Recall@1:** Is it in top 1? ❌ No → **0%**
-- **Recall@5:** Is it in top 5? ❌ No → **0%**
-- **Recall@10:** Is it in top 10? ✅ Yes → **100%** (it's in ALL results!)
-
-Since we're retrieving **top 10 from a set of 10**, we always get 100%.
-
----
-
-## Proof That Model Is NOT Overfitting
-
-If the model was overfitting (memorizing training data), we would see:
-
-| Scenario | Expected Results if Overfitting |
-|----------|----------------------------------|
-| Recall@1 | Should be ~100% |
-| Recall@5 | Should be ~100% |
-| Recall@10 | Should be ~100% |
-
-### Actual Results:
-
-| Task | Recall@1 (I2T) | Recall@5 (I2T) | Recall@10 (I2T) |
-|------|----------------|----------------|-----------------|
-| task_1 | **10%** | **60%** | 100% |
-| task_2 | **0%** | **50%** | 100% |
-
-**Interpretation:**
-- ✅ Recall@1 and Recall@5 are **far below 100%** → Model is generalizing, not memorizing
-- ✅ Model learns some patterns but doesn't perfectly fit
-- ⚠️ Recall@10 = 100% only because validation set = 10 samples (mathematical ceiling)
-
----
-
-## When Would Recall@10 Be Meaningful?
-
-To get discriminative Recall@10 scores, you need **validation sets larger than 10 samples**:
-
-| Validation Size | Recall@10 Can Discriminate? |
-|-----------------|----------------------------|
-| 10 samples | ❌ No - Always 100% |
-| 100 samples | ✅ Yes - Meaningful metric |
-| 1000 samples | ✅ Yes - Highly discriminative |
-
-### Example with 1000 samples:
-- Retrieve top 10 from 1000 candidates
-- If correct match is at rank #500, Recall@10 = 0%
-- If correct match is at rank #3, Recall@10 = 100%
-- Actual performance: typically 30-80% (varies by model quality)
-
----
-
-## Summary
-
-### What We Know:
-1. ✅ **Data is properly split** (40 train / 10 val, separate directories)
-2. ✅ **No data leakage** (train_img_*.jpg vs val_img_*.jpg)
-3. ✅ **Model is learning** (proven by low Recall@1 scores)
-4. ⚠️ **Validation set too small** for Recall@10 to be meaningful
-
-### Key Takeaway:
-> The 100% Recall@10 is not a bug or sign of overfitting—it's a **mathematical artifact** of having exactly 10 validation samples.
-
-### Recommendations for Better Evaluation:
-1. **Increase validation set size** to 100+ samples per task
-2. **Focus on Recall@1 and Recall@5** for current dataset size
-3. **Test on real datasets** (COCO, Flickr30k) with thousands of samples
-4. **Current metrics are valid** for proof-of-concept, but limited
-
----
-
-## Technical Details
-
-### Recall@K Formula:
-```
-Recall@K = (Number of queries where correct match is in top K) / (Total queries)
-```
-
-### For 10-sample validation set:
-```
-Recall@10 = (Number of queries where correct is in top 10) / 10
-          = 10/10  (always, since we retrieve all)
-          = 1.0 = 100%
-```
-
-This is **expected behavior**, not an error!
-
----
-
-## Conclusion
-
-Your implementation is **correct** ✅
-
-The 100% Recall@10 is expected and does not indicate any problem with your training/testing split. To see more realistic Recall@10 scores, test on larger datasets like COCO (5000+ samples) or Flickr30k (1000+ samples).
+All pretrained baselines are within expected ranges for CLIP ViT-B/16, confirming correct data loading and evaluation.

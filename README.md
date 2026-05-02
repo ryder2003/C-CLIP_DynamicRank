@@ -1,104 +1,135 @@
-# C-CLIP: Continual CLIP Implementation
+# C-CLIP with Dynamic Rank Selection (CoDyRA)
 
-A complete PyTorch implementation of **C-CLIP (Continual CLIP)** - a multimodal continual learning framework that enables vision-language models to continuously learn from new datasets without catastrophic forgetting.
+A complete PyTorch implementation of **C-CLIP (Continual CLIP)** enhanced with **Multi-Armed Bandit (MAB) dynamic LoRA rank selection** — a multimodal continual learning framework that enables vision-language models to continuously learn from new datasets without catastrophic forgetting, while automatically selecting the optimal LoRA rank per task.
 
-Based on the paper: *"C-CLIP: Multimodal Continual Learning"*
+Based on: *"C-CLIP: Multimodal Continual Learning"* + our novel **CoDyRA** (Continual Dynamic Rank Allocation) extension.
 
 ## 🌟 Key Features
 
-- **LoRA Integration**: Parameter-efficient adaptation using Low-Rank Adaptation
+- **Dynamic LoRA Rank Selection**: Multi-Armed Bandit (UCB1) automatically selects optimal LoRA rank ∈ {4, 8, 16, 32} per task
+- **Uniform Scaling via Dynamic Alpha**: `alpha = 2 * rank` ensures consistent scaling=2.0 across all ranks, isolating capacity from magnitude
+- **Dual Distillation**: CKC loss against previous-task model + anchor distillation against frozen pretrained CLIP
 - **Contrastive Knowledge Consolidation (CKC)**: Novel loss function that learns from old model features
 - **Multimodal Learning**: Handles both vision and text modalities with asymmetric learning rates
 - **Stateless Continual Learning**: No task-ID required at inference
 - **Zero-Shot Preservation**: Maintains general zero-shot capabilities across domains
-- **Backward Transfer**: Performance on old tasks often improves as new tasks are learned
+- **Bandit-Guided Exploration**: Force-explores all ranks, then exploits the best via UCB1
 
-## 📋 Results from Paper
+## 📊 Our Results (5-Task CoDyRA Benchmark, 30 Epochs)
 
-- **Image-Text Retrieval**: 40.83% average I2T Recall@1 across 8 datasets (+9.58% over next best)
-- **Zero-Shot Classification**: Only 7.42% ImageNet degradation vs 18-27% for competitors
-- Often **exceeds full fine-tuning** performance on new tasks
-- Demonstrates **positive backward transfer** on previous tasks
+### Task Sequence & Bandit Rank Choices
 
-## 📊 Our Results (3 Tasks: Flowers102 → Oxford Pets → Simpsons)
+| Task | Dataset | Classes | Train Samples | LoRA Rank (MAB) | Strategy |
+|------|---------|---------|---------------|-----------------|----------|
+| 1 | FGVC Aircraft | 100 | 6,667 | **r=4** | force_explore |
+| 2 | DTD (Textures) | 47 | 3,760 | **r=8** | force_explore |
+| 3 | EuroSAT | 10 | 22,950 | **r=16** | force_explore |
+| 4 | Flowers102 | 102 | 2,040 | **r=32** | force_explore |
+| 5 | Oxford Pets | 37 | 6,282 | **r=16** | ucb1 exploit |
 
-### Full Accuracy Progression
+### Pretrained CLIP Zero-Shot Baselines
 
-The table below tracks zero-shot classification accuracy at every stage, from the pretrained baseline through bug fixes and the final trained model:
+| Dataset | Pretrained Accuracy |
+|---------|-------------------|
+| FGVC Aircraft | 23.97% |
+| DTD | 43.99% |
+| EuroSAT | 46.86% |
+| Flowers102 | 67.88% |
+| Oxford Pets | 87.27% |
+| **Average** | **54.00%** |
 
-| Stage | Flowers102 | Oxford Pets | Simpsons | Notes |
-|-------|-----------|-------------|----------|-------|
-| Pretrained CLIP (GELU, buggy) | 63.36% | 85.02% | 51.45% | Wrong activation function |
-| Pretrained CLIP (QuickGELU, correct) | 69.63% | 88.72% | 61.58% | Correct baseline |
-| 1st Training Run (buggy code) | 69.63% | 88.72% | 61.58% | Identical to baseline — bugs found |
-| **After Task 0 (Flowers)** | **99.43%** | 85.47% | 51.16% | +29.80% on Flowers, no CKC yet |
-| **After Task 1 (Pets)** | **99.19%** | **95.85%** | 53.27% | CKC preserves Flowers at 99%! |
-| **Final (After Task 2, Simpsons)** | **84.69%** | **91.88%** | **98.12%** | All tasks above baseline |
+### Accuracy Matrix R[i,j]
+
+| Stage | Aircraft | DTD | EuroSAT | Flowers | Pets |
+|-------|----------|-----|---------|---------|------|
+| Pretrained CLIP | 23.97% | 43.99% | 46.86% | 67.88% | 87.27% |
+| After Task 0 (Aircraft, r=4) | **43.59%** | — | — | — | — |
+| After Task 1 (DTD, r=8) | 42.09% | **69.47%** | — | — | — |
+| After Task 2 (EuroSAT, r=16) | 39.90% | 67.66% | **93.93%** | — | — |
+| After Task 3 (Flowers, r=32) | 40.14% | 67.55% | 92.84% | **90.96%** | — |
+| **After Task 4 (Pets, r=16)** | **39.36%** | **66.44%** | **92.37%** | **89.87%** | **95.76%** |
+
+### Final Results (After All 5 Tasks)
+
+| Dataset | Pretrained | Final (C-CLIP + DynRank) | Gain |
+|---------|-----------|--------------------------|------|
+| FGVC Aircraft | 23.97% | **39.36%** | **+15.39%** |
+| DTD | 43.99% | **66.44%** | **+22.45%** |
+| EuroSAT | 46.86% | **92.37%** | **+45.51%** |
+| Flowers102 | 67.88% | **89.87%** | **+21.99%** |
+| Oxford Pets | 87.27% | **95.76%** | **+8.48%** |
+| **Average** | **54.00%** | **76.76%** | **+22.76%** |
 
 ### Key Metrics
 
-#### Paper Metrics (X-TAIL Framework)
-| Metric | Value | Description |
-|--------|-------|-------------|
-| **Last** | **91.56%** | Avg accuracy on all domains after final step |
-| **Average** | **84.34%** | Avg accuracy across all steps x all domains |
-| **Transfer** | **63.30%** | Avg zero-shot on unseen domains during training |
-
-#### Traditional CL Metrics
 | Metric | Value |
 |--------|-------|
-| Backward Transfer (BWT) | **-9.36%** |
-| Forward Transfer (FWT) | -5.78% |
-| Average Forgetting | 9.36% |
-| Avg Incremental Accuracy | **96.17%** |
-| Avg Gain Over Baseline | **+18.25%** |
-| Best single-task gain | +36.54% (Simpsons) |
-| Max forgetting | 14.74% (Flowers) |
-| Trainable parameters | 3.44M / 149M (2.3%) |
-| Training time | ~48 hours (RTX 3050 6GB Laptop) |
+| **Average Accuracy (A)** | **76.76%** |
+| **Average Forgetting (F)** | **2.48%** |
+| **Backward Transfer (BWT)** | **-2.48%** |
+| All Tasks Above Baseline | ✅ Yes |
+| Best Single-Task Gain | +45.51% (EuroSAT) |
+| Total Training Time | ~164 min |
 
-### Gain Over Baseline (Final vs Pretrained)
+### Per-Task Forgetting
 
-| Dataset | Pretrained | Final (C-CLIP) | Gain |
-|---------|-----------|----------------|------|
-| Flowers102 | 69.63% | 84.69% | +15.06% |
-| Oxford Pets | 88.72% | 91.88% | +3.16% |
-| Simpsons | 61.58% | 98.12% | +36.54% |
-| **Average** | **73.31%** | **91.56%** | **+18.25%** |
+| Task | Peak Accuracy | Final Accuracy | Forgetting |
+|------|--------------|----------------|------------|
+| FGVC Aircraft | 43.59% | 39.36% | 4.23% |
+| DTD | 69.47% | 66.44% | 3.03% |
+| EuroSAT | 93.93% | 92.37% | 1.56% |
+| Flowers102 | 90.96% | 89.87% | 1.09% |
+
+### Bandit Reward History
+
+| Rank | Task Used | Reward | Breakdown |
+|------|-----------|--------|-----------|
+| r=4 | Aircraft | 0.964 | Plasticity=0.909, Stability=1.000 |
+| r=8 | DTD | 0.916 | Plasticity=0.790, Stability=1.000 |
+| r=16 | EuroSAT | **1.000** | Plasticity=1.000, Stability=1.000 |
+| r=32 | Flowers | 0.868 | Plasticity=0.670, Stability=1.000 |
+| r=16 | Pets (exploit) | — | UCB1 selected best arm |
+
+**UCB1 convergence:** After exploring all arms, the bandit correctly identified **r=16** as optimal and selected it for the final task.
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      C-CLIP Model                        │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌─────────────┐                    ┌─────────────┐    │
-│  │   Vision    │    LoRA Layers     │    Text     │    │
-│  │   Encoder   ├───────┬────────────┤   Encoder   │    │
-│  │  (ViT-B/16) │       │            │             │    │
-│  └──────┬──────┘       │            └──────┬──────┘    │
-│         │              │                   │            │
-│         │      Current Model               │            │
-│  ┌──────▼──────┐       │            ┌──────▼──────┐    │
-│  │  Vision     │       │            │    Text     │    │
-│  │  Projector  │       │            │  Projector  │    │
-│  └──────┬──────┘       │            └──────┬──────┘    │
-│         │              │                   │            │
-│         └──────────────┼───────────────────┘            │
-│                        │                                │
-│              ┌─────────▼─────────┐                      │
-│              │   CKC Loss +      │                      │
-│              │   CLIP Loss       │                      │
-│              └───────────────────┘                      │
-│                                                          │
-│         Old Model (frozen, for CKC)                     │
-│  ┌─────────────┐              ┌─────────────┐          │
-│  │   Vision    │              │    Text     │          │
-│  │   Encoder   │              │   Encoder   │          │
-│  └─────────────┘              └─────────────┘          │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│               C-CLIP with Dynamic Rank (CoDyRA)              │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────┐                  ┌──────────────┐         │
+│  │    Vision     │   LoRA (rank r) │     Text     │         │
+│  │    Encoder    ├─────┬───────────┤    Encoder   │         │
+│  │  (ViT-B/16)  │     │           │              │         │
+│  └──────┬───────┘     │           └──────┬───────┘         │
+│         │             │                  │                  │
+│         │      ┌──────▼──────┐           │                  │
+│         │      │  MAB Rank   │           │                  │
+│         │      │  Selector   │           │                  │
+│         │      │  (UCB1)     │           │                  │
+│         │      │ r∈{4,8,16,32}│          │                  │
+│         │      └──────┬──────┘           │                  │
+│         │             │                  │                  │
+│  ┌──────▼──────┐      │          ┌──────▼──────┐           │
+│  │   Vision    │      │          │    Text     │           │
+│  │  Projector  │      │          │  Projector  │           │
+│  └──────┬──────┘      │          └──────┬──────┘           │
+│         └─────────────┼──────────────────┘                  │
+│                       │                                      │
+│             ┌─────────▼──────────┐                          │
+│             │  CLIP Loss + CKC   │                          │
+│             │  + Anchor Distill  │                          │
+│             └────────────────────┘                          │
+│                                                              │
+│   Frozen Models (for distillation):                         │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│   │  Pretrained  │  │  Old Model   │  │   Bandit     │    │
+│   │  CLIP Anchor │  │  (prev task) │  │   State      │    │
+│   └──────────────┘  └──────────────┘  └──────────────┘    │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Installation
@@ -107,19 +138,19 @@ The table below tracks zero-shot classification accuracy at every stage, from th
 
 - Python 3.8+
 - CUDA 11.8+ (for GPU support)
-- 8GB+ GPU memory (for ViT-B/16), 24GB+ for ViT-L/14
+- 8GB+ GPU memory (for ViT-B/16)
 
 ### Setup
 
 ```bash
 # Clone the repository
 git clone <your-repo-url>
-cd C-CLip_Implementation
+cd C-CLIP_DynamicRank
 
 # Create virtual environment
 python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
+source .venv/bin/activate  # Linux/Mac
+# .venv\Scripts\activate    # Windows
 
 # Install dependencies
 pip install -r requirements.txt
@@ -127,338 +158,234 @@ pip install -r requirements.txt
 
 ## 📊 Data Preparation
 
-### Dataset Format
+### Dataset Format (CSV)
 
-C-CLIP supports multiple dataset formats:
-
-#### 1. CSV Format (Recommended)
 ```csv
 image,caption
 images/train/img1.jpg,"A photo of a cat"
 images/train/img2.jpg,"A dog playing in the park"
 ```
 
-#### 2. JSON Format
-```json
-[
-  {
-    "image": "images/train/img1.jpg",
-    "caption": "A photo of a cat"
-  },
-  {
-    "image": "images/train/img2.jpg",
-    "caption": "A dog playing in the park"
-  }
-]
+### CoDyRA 5-Task Benchmark Datasets
+
+| # | Dataset | Domain | Classes | Images |
+|---|---------|--------|---------|--------|
+| 0 | FGVC Aircraft | Fine-grained aircraft | 100 | ~10K |
+| 1 | DTD | Describable textures | 47 | ~5.6K |
+| 2 | EuroSAT | Satellite imagery | 10 | ~27K |
+| 3 | Flowers102 | Fine-grained flowers | 102 | ~8K |
+| 4 | Oxford Pets | Cat/dog breeds | 37 | ~7.4K |
+
+```bash
+# Prepare dataset CSVs from raw downloads
+python scripts/prepare_real_datasets.py
 ```
-
-#### 3. Directory Structure
-```
-data/
-  dataset_name/
-    images/
-      img1.jpg
-      img1.txt  # Contains caption
-      img2.jpg
-      img2.txt
-```
-
-### Example Datasets (from paper)
-
-1. **Flickr30K** - General real-world images
-2. **COCO-caption** - General real-world images
-3. **Oxford Pets** - Pet domain
-4. **Lexica** - AI-generated images
-5. **Simpsons** - Animation domain
-6. **WikiArt** - Art domain
-7. **Kream** - Fashion/clothing domain
-8. **Sketch** - Sketch domain
-
-Place your datasets in the `data/` directory following the structure above.
 
 ## 🎯 Training
 
-### Quick Start
+### Quick Start (Dynamic Rank / MAB)
 
 ```bash
-python src/train.py --config configs/default_config.yaml
+# Fresh training run with MAB rank selection
+python src/train_bandit.py --config bandit_config.yaml --fresh
 ```
 
-### Configuration
-
-Edit `configs/default_config.yaml` to customize:
+### Configuration (`bandit_config.yaml`)
 
 ```yaml
 model:
-  clip_model_name: "ViT-B-16"  # ViT-B-32, ViT-B-16, ViT-L-14
-  lora_r: 16                    # LoRA rank
-  lora_alpha: 32                # Scaling factor
-  integration_coeff: 0.7        # Merging coefficient (0.7 recommended)
-  lora_target_modules:           # LoRA targets (attention + MLP)
-    - "q_proj"
-    - "v_proj"
-    - "c_fc"
-    - "c_proj"
+  clip_model_name: "ViT-B-16"
+  pretrained: "openai"
+  # lora_alpha is DYNAMIC: alpha = 2 * rank (uniform scaling=2.0)
+  lora_dropout: 0.05
+  integration_coeff: 0.5
+
+bandit:
+  rank_choices: [4, 8, 16, 32]
+  algorithm: "ucb1"
+  plasticity_w: 0.4      # weight for task accuracy
+  stability_w: 0.6       # weight for retention (anti-forgetting)
+  ucb_c: 2.0
 
 training:
-  batch_size: 64                # Adjust based on VRAM (64 for 6GB)
-  gradient_accumulation_steps: 4 # Effective batch = 256
-  epochs_per_task: 40
-  base_lr: 0.0002              # 2e-4 for LoRA
-  text_lr_multiplier: 5        # Text encoder LR multiplier
-
-datasets:
-  - name: "flickr30k"
-    train_path: "data/flickr30k/train.csv"
-    val_path: "data/flickr30k/val.csv"
-    image_dir: "data/flickr30k/images"
+  batch_size: 64
+  accumulate_grad_batches: 4    # effective batch = 256
+  epochs_per_task: 30
+  base_lr: 0.00005              # 5e-5
+  text_lr_multiplier: 3
+  ckc_weight: 2.0
+  pretrained_distill_weight: 1.5
 ```
 
 ### Training Process
 
 The training automatically handles:
-1. **Task 1**: Trains with CLIP loss only
-2. **Task 2+**: Injects LoRA, trains with CLIP + CKC loss
-3. **After each task**: Merges LoRA weights into base model
-4. **Evaluation**: Evaluates on all learned tasks after each task
+1. **Zero-shot baselines**: Evaluates pretrained CLIP on all tasks
+2. **Per-task training**: Bandit selects LoRA rank → inject LoRA → train → merge
+3. **Force-exploration**: First N tasks explore each rank arm once
+4. **UCB1 exploitation**: Subsequent tasks pick the best rank via UCB1
+5. **Evaluation**: Zero-shot classification on all learned tasks after each task
+6. **Reward computation**: Plasticity + stability reward updates bandit state
 
-### Multi-GPU Training
+### Bandit Reward Formula
 
-```bash
-# Modify config
-hardware:
-  devices: 4  # Use 4 GPUs
-  
-python src/train.py --config configs/default_config.yaml
 ```
-
-### Learning Rate Guidelines (from paper)
-
-Different datasets require different learning rates:
-
-- **Flickr30K**: `base_lr: 1e-5`, text_multiplier: 10
-- **COCO**: `base_lr: 5e-7`, text_multiplier: 80
-- **Others**: `base_lr: 3e-5`, text_multiplier: 10
+Plasticity  = task_acc_gain / max_possible_gain
+Stability   = worst_case_retention_ratio
+Reward      = plasticity_w * Plasticity + stability_w * Stability
+```
 
 ## 📈 Evaluation
 
-### Evaluate on Retrieval Tasks
+### Evaluate Final Model
 
 ```bash
-python src/evaluate.py \
-  --checkpoint checkpoints/model_final.pt \
-  --config configs/default_config.yaml \
-  --eval_config configs/eval_config.json \
-  --output results/evaluation_results.json
+# The training script evaluates automatically after each task
+# For standalone evaluation with CL metrics:
+python scripts/eval_bandit.py
 ```
 
-### Evaluate Zero-Shot Classification (Per-Task Checkpoints)
+### Checkpoint Files
 
-```bash
-# After Task 0 (Flowers)
-python scripts/eval_zero_shot.py \
-    --checkpoint checkpoints/real_datasets/model_after_task_0.pt \
-    --config configs/real_datasets_config.yaml \
-    --output results/task0_accuracy.json
-
-# After Task 1 (Pets)
-python scripts/eval_zero_shot.py \
-    --checkpoint checkpoints/real_datasets/model_after_task_1.pt \
-    --config configs/real_datasets_config.yaml \
-    --output results/task1_accuracy.json
-
-# After Task 2 / Final Model
-python scripts/eval_zero_shot.py \
-    --checkpoint checkpoints/real_datasets/model_final.pt \
-    --config configs/real_datasets_config.yaml \
-    --output results/final_accuracy.json
 ```
-
-### Compute All Metrics (Paper + Traditional CL)
-
-```bash
-# Computes Last, Average, Transfer, BWT, FWT, AF, AIA, and saves to results/comprehensive_metrics.json
-python scripts/compute_all_metrics.py
+checkpoints/bandit_run/
+├── model_after_task_0_r4.pt     # After Aircraft (rank=4)
+├── model_after_task_1_r8.pt     # After DTD (rank=8)
+├── model_after_task_2_r16.pt    # After EuroSAT (rank=16)
+├── model_after_task_3_r32.pt    # After Flowers (rank=32)
+├── model_after_task_4_r16.pt    # After Pets (rank=16, UCB1)
+├── model_final_bandit.pt        # Final model
+├── bandit_history.json          # Full bandit state & history
+└── cl_metrics.json              # Continual learning metrics
 ```
-
-### Generate PDF Report
-
-```bash
-# Generates comprehensive report at results/CCLIP_Implementation_Report.pdf
-python scripts/generate_report.py
-```
-
-### Full Evaluation Pipeline (One Shot)
-
-```bash
-python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_0.pt --config configs/real_datasets_config.yaml --output results/task0_accuracy.json
-python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_after_task_1.pt --config configs/real_datasets_config.yaml --output results/task1_accuracy.json
-python scripts/eval_zero_shot.py --checkpoint checkpoints/real_datasets/model_final.pt --config configs/real_datasets_config.yaml --output results/final_accuracy.json
-python scripts/compute_all_metrics.py
-python scripts/generate_report.py
-```
-
-### Metrics Computed
-
-**Paper Metrics (X-TAIL Framework, NeurIPS 2024):**
-- **Last**: Average accuracy on all domains after the final learning step
-- **Average**: Mean accuracy across all learning steps × all domains
-- **Transfer**: Average zero-shot accuracy on unseen domains during training
-
-**Traditional Continual Learning Metrics:**
-- **Backward Transfer (BWT)**: How much accuracy on old tasks changes after new ones
-- **Forward Transfer (FWT)**: Impact on unseen domains from previous learning
-- **Average Forgetting (AF)**: Average peak-to-final accuracy drop on old tasks
-- **Average Incremental Accuracy (AIA)**: Avg accuracy on learned tasks at each step
-
-**Standard Metrics:**
-- **Image-to-Text Retrieval**: Recall@1, Recall@5, Recall@10
-- **Text-to-Image Retrieval**: Recall@1, Recall@5, Recall@10
-- **Zero-Shot Classification**: Top-1 Accuracy
-- **Gain Over Baseline**: Final vs pretrained accuracy per domain
-
-> See [METRICS_ANALYSIS.md](METRICS_ANALYSIS.md) for detailed mathematical definitions, formulas, interpretations, and computed values for every metric.
 
 ## 🧪 Key Implementation Details
 
-### LoRA Configuration
+### Dynamic LoRA Rank Selection
 
 ```python
-lora_r: 16              # Rank (paper tested 8, 16, 32, 64)
-lora_alpha: 32          # Scaling factor (2*r)
-lora_dropout: 0.1       # Dropout probability
-integration_coeff: 0.7  # Merging coefficient (0.7 optimal for our setup)
-lora_target_modules:    # Inject into attention AND MLP layers
-  - q_proj, v_proj      # Attention Q/V projections (LoRAForAttn)
-  - c_fc, c_proj        # MLP layers (LoRALayer)
-# Total: 72 LoRA layers, 3.44M trainable params
+# Alpha scales with rank for uniform scaling magnitude
+alpha = 2 * rank    # scaling = alpha/r = 2.0 for ALL ranks
+# This isolates rank's effect to capacity (parameter count) only
 ```
+
+| Rank | Alpha | Scaling | LoRA Params | Description |
+|------|-------|---------|-------------|-------------|
+| 4 | 8 | 2.0 | 860K | Minimal adaptation |
+| 8 | 16 | 2.0 | 1.7M | Light adaptation |
+| 16 | 32 | 2.0 | 3.4M | Moderate adaptation |
+| 32 | 64 | 2.0 | 6.9M | Full adaptation |
 
 ### Loss Functions
 
-#### CLIP Loss
+#### CLIP Loss (contrastive alignment)
 ```math
 L_CLIP = -1/(2N) Σ[log(exp(z_v·z_c/τ) / Σexp(z_v·z_c'/τ))]
 ```
 
-#### CKC Loss
+#### CKC Loss (knowledge consolidation vs previous task)
 ```math
 L_CKC = -1/(2N) Σ[log(exp(h_new·z_old/τ) / Σexp(h_new·z_old'/τ))]
 ```
 
-#### Total Loss
+#### Pretrained Anchor Distillation
 ```math
-L_total = L_CLIP + L_CKC
+L_anchor = -1/(2N) Σ[log(exp(h_new·z_pretrained/τ) / Σexp(h_new·z_pretrained'/τ))]
 ```
 
-### Hyperparameters (our configuration)
+#### Total Loss
+```math
+L_total = L_CLIP + ckc_weight * L_CKC + pretrained_distill_weight * L_anchor
+```
 
-- **Optimizer**: AdamW (β₁=0.9, β₂=0.99)
-- **Weight Decay**: 0.01 for projectors, 0.0 for LoRA params (critical!)
-- **Scheduler**: Cosine decay with 3-epoch warmup
-- **Batch Size**: 64 micro (effective 256 with gradient accumulation 4)
-- **Base LR**: 2e-4 (vision LoRA), 1e-3 (text LoRA, 5x multiplier)
-- **Temperature**: 0.07
-- **Epochs**: 40 per task
-- **Precision**: 16-mixed (AMP)
+### Hyperparameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Optimizer | AdamW (β₁=0.9, β₂=0.99) | |
+| Weight Decay | 0.01 (projectors), 0.0 (LoRA) | Critical for LoRA stability |
+| Base LR | 5e-5 | Vision LoRA |
+| Text LR | 1.5e-4 (3× multiplier) | Text encoder |
+| Scheduler | Cosine decay + 3-epoch warmup | ~10% warmup ratio |
+| Batch Size | 64 micro (256 effective) | 4× gradient accumulation |
+| Temperature | 0.07 | |
+| Epochs/Task | 30 | |
+| Precision | 16-mixed (AMP) | |
+| CKC Weight | 2.0 | Distillation strength |
+| Anchor Weight | 1.5 | Pretrained anchor strength |
+| Integration Coeff | 0.5 | LoRA merge coefficient |
 
 ## 📁 Project Structure
 
 ```
-C-CLip_Implementation/
+C-CLIP_DynamicRank/
 ├── src/
 │   ├── models/
 │   │   ├── lora.py              # LoRA implementation
-│   │   ├── clip_wrapper.py      # CLIP model wrapper
-│   │   └── cclip.py            # Main C-CLIP model
+│   │   ├── clip_wrapper.py      # CLIP model wrapper (OpenCLIP)
+│   │   └── cclip.py             # Base C-CLIP model
 │   ├── losses/
-│   │   └── cclip_loss.py       # CLIP and CKC losses
+│   │   └── cclip_loss.py        # CLIP + CKC + anchor losses
 │   ├── data/
-│   │   ├── datasets.py          # Dataset classes
-│   │   └── transforms.py        # Data transformations
+│   │   ├── datasets.py          # Dataset classes & DataModule
+│   │   └── transforms.py        # CLIP image transformations
 │   ├── utils/
-│   │   ├── config.py            # Configuration utilities
-│   │   └── evaluation.py        # Evaluation metrics
-│   ├── train.py                 # Training script
-│   └── evaluate.py              # Evaluation script
-├── configs/
-│   ├── default_config.yaml      # Default configuration
-│   └── eval_config.json         # Evaluation configuration
-├── data/                        # Dataset directory
+│   │   ├── config.py            # Configuration management
+│   │   └── evaluation.py        # Zero-shot evaluation
+│   ├── train.py                 # Base training script
+│   └── train_bandit.py          # MAB dynamic rank training
+│
+├── cclip_bandit.py              # CCLIPWithBandit model
+├── rank_bandit.py               # LoRARankBandit (UCB1/ε-greedy/Thompson)
+├── bandit_config.yaml           # MAB training configuration
+│
+├── configs/                     # Additional config files
+├── data/                        # Dataset CSV splits
+├── datasets/                    # Raw dataset images
 ├── checkpoints/                 # Model checkpoints
+├── results/                     # Evaluation results
+├── report.tex                   # LaTeX report
 ├── requirements.txt
 └── README.md
 ```
 
-## 🔬 Paper Implementation Details
+## 🔬 Novel Contributions
 
-### Key Innovations
+### 1. Multi-Armed Bandit Rank Selection (CoDyRA)
+Instead of using a fixed LoRA rank for all tasks, our system uses UCB1 to dynamically choose the optimal rank per task. The bandit balances:
+- **Plasticity** (learning new tasks well)
+- **Stability** (not forgetting old tasks)
 
-1. **LoRA Integration**: Unlike standard LoRA that keeps adapters separate, C-CLIP merges LoRA weights into the backbone after each task with coefficient α=0.5
+### 2. Uniform Scaling via Dynamic Alpha
+Setting `alpha = 2 * rank` ensures that the LoRA scaling factor is always 2.0, regardless of rank. This lets the bandit evaluate ranks purely on their **capacity** (number of parameters), not on scaling artifacts.
 
-2. **CKC Loss**: Instead of preserving old features (as in knowledge distillation), CKC treats old features as positive anchors in contrastive learning, creating 2N² pairs per batch
+### 3. Dual Distillation Architecture
+- **CKC against previous-task model**: Prevents forgetting the most recently learned task
+- **Anchor distillation against frozen pretrained CLIP**: Preserves the original zero-shot transfer capability from the very first task
 
-3. **Projector Layer**: Creates a "connected but not identical" feature space, enabling both stability and plasticity
-
-4. **Asymmetric Learning Rates**: Text encoder learns 10-80× faster than vision encoder to handle caption diversity
-
-### Theoretical Foundation
-
-The paper proves that constraining parameter changes (via LoRA) is equivalent to regularization methods through Lipschitz continuity:
-
-```math
-||f_θ(v) - f_θ'(v)|| ≤ K_f ||θ - θ'||
-```
-
-## 📊 Expected Results (Paper) & Our Measured Results
-
-### Paper Results (8 Tasks, retrieval metrics)
-
-| Dataset | I2T R@1 | T2I R@1 |
-|---------|---------|---------||
-| Flickr30K | 84.40% | 73.74% |
-| COCO | 56.92% | 42.82% |
-| Pets | ~40% | ~35% |
-| Lexica | 42.65% | 41.47% |
-
-### Paper Zero-Shot Classification
-
-| Dataset | Accuracy (Final) | Degradation |
-|---------|-----------------|-------------|
-| ImageNet | 60.31% | 7.42% |
-| CIFAR-100 | 61.58% | 5.29% |
-
-### Our Measured Results (3 Tasks: Flowers → Pets → Simpsons)
-
-| Dataset | Pretrained Baseline | After Own Task | Final Model | Gain Over Baseline |
-|---------|-------------------|----------------|-------------|-------------------|
-| Flowers102 | 69.63% | 99.43% | 84.69% | +15.06% |
-| Oxford Pets | 88.72% | 95.85% | 91.88% | +3.16% |
-| Simpsons | 61.58% | 98.12% | 98.12% | +36.54% |
-| **Average** | **73.31%** | **97.80%** | **91.56%** | **+18.25%** |
-
-> **BWT (Backward Transfer)**: -9.36% | Flowers forgetting: -14.74% | Pets forgetting: -3.97%
+### 4. Bandit Reward with Worst-Case Stability
+The reward function uses worst-case retention across all previously seen tasks, not just average retention. This strongly penalizes catastrophic forgetting on any single task.
 
 ## 🐛 Troubleshooting
 
 ### Out of Memory
 - Reduce batch size in config
 - Use smaller model (ViT-B-32 instead of ViT-B-16)
-- Use gradient checkpointing (add to config)
+- Reduce max rank from 32 to 16
 
-### Poor Performance
-- Check learning rates (very sensitive to dataset)
-- Ensure text_lr_multiplier is set correctly (10-80x)
-- Verify data loading (check image-caption pairs)
+### Bandit Choosing Suboptimal Ranks
+- Increase `ucb_c` for more exploration
+- Check that rewards are computed correctly
+- Ensure enough tasks for exploration (≥ number of rank arms)
 
-### Slow Training
-- Increase num_workers for data loading
-- Use mixed precision (16-mixed)
-- Ensure drop_last=True in dataloader for contrastive learning
+### High Forgetting
+- Increase `stability_w` (e.g., 0.7)
+- Increase `pretrained_distill_weight`
+- Lower `integration_coeff` for gentler merging
 
 ## 📚 Citation
 
-If you use this implementation, please cite the original paper:
+If you use this implementation, please cite:
 
 ```bibtex
 @article{cclip2024,
@@ -477,10 +404,6 @@ This implementation is provided for research purposes. Please check the original
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
 
-## 📧 Contact
-
-For questions or issues, please open an issue on GitHub.
-
 ---
 
-**Note**: This implementation is based on the C-CLIP paper. Some details may differ from the original implementation. Please refer to the paper for the official method.
+**Note**: This implementation extends the C-CLIP paper with a novel Multi-Armed Bandit dynamic rank selection mechanism (CoDyRA). The base C-CLIP method is from the original paper; the dynamic rank allocation is our contribution.

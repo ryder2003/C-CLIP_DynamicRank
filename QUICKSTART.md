@@ -1,334 +1,195 @@
-# C-CLIP Quick Start Guide
+# C-CLIP + Dynamic Rank: Quick Start Guide
 
-Get up and running with C-CLIP in 10 minutes!
+Get up and running with C-CLIP and MAB dynamic rank selection in 10 minutes!
 
 ## Step 1: Installation (2 minutes)
 
 ```bash
 # Clone or navigate to the repository
-cd C-CLip_Implementation
+cd C-CLIP_DynamicRank
 
 # Create virtual environment
 python -m venv .venv
 
-# Activate (Windows)
-.venv\Scripts\activate
-
 # Activate (Linux/Mac)
-# source .venv/bin/activate
+source .venv/bin/activate
+
+# Activate (Windows)
+# .venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-## Step 2: Test the Implementation (3 minutes)
+## Step 2: Prepare Datasets (5 minutes)
 
-Run the test suite to verify everything works:
-
-```bash
-python scripts/test_implementation.py
-```
-
-You should see:
-```
-✓ All tests passed successfully!
-```
-
-## Step 3: Try the Minimal Example (5 minutes)
-
-Run a minimal training example with dummy data:
+Download datasets to the `datasets/` directory, then generate CSV splits:
 
 ```bash
-python examples/minimal_train.py
+python scripts/prepare_real_datasets.py
 ```
 
-This will:
-- Initialize C-CLIP with ViT-B/32
-- Train on Task 1 for 2 epochs (CLIP loss only)
-- Train on Task 2 for 2 epochs (CLIP + CKC loss)
-- Save the model checkpoint
+This creates train/val CSV files in `data/` for all 5 benchmark datasets:
 
-Expected output:
-```
-Task 1: Training
-  Batch [10/100] Loss: 2.1234 I2T: 15.32% T2I: 14.87%
-  ...
-✓ Task 1 completed and weights merged
+| Dataset | Directory | Classes | ~Images |
+|---------|-----------|---------|---------|
+| FGVC Aircraft | `datasets/fgvc_aircraft/` | 100 | 10K |
+| DTD | `datasets/dtd/` | 47 | 5.6K |
+| EuroSAT | `datasets/eurosat/` | 10 | 27K |
+| Flowers102 | `datasets/102flowers/` | 102 | 8K |
+| Oxford Pets | `datasets/Oxford_IIITPets/` | 37 | 7.4K |
 
-Task 2: Training with CKC
-  Batch [10/100] Loss: 2.0145 I2T: 18.45% T2I: 17.92%
-  ...
-✓ Task 2 completed and weights merged
-```
-
-## Step 4: Prepare Your Own Data
-
-### Option A: Quick Format
-
-Create a CSV file with your image-caption pairs:
-
-```csv
-image,caption
-images/img1.jpg,"A photo of a cat"
-images/img2.jpg,"A dog in the park"
-```
-
-### Option B: Use the Preparation Script
-
-If you have images with paired text files:
+## Step 3: Train with Dynamic Rank Selection
 
 ```bash
-python scripts/prepare_data.py \
-  --image_dir data/my_dataset/images \
-  --output_csv data/my_dataset/dataset.csv \
-  --split \
-  --val_ratio 0.2
+# Fresh training run with MAB rank selection
+python src/train_bandit.py --config bandit_config.yaml --fresh
 ```
 
-This creates:
-- `dataset_train.csv` (80% of data)
-- `dataset_val.csv` (20% of data)
+The `--fresh` flag clears any previous bandit state for a clean run.
 
-## Step 5: Configure Training
+### What happens during training:
 
-Edit `configs/default_config.yaml`:
+1. **Baselines**: Pretrained CLIP is evaluated zero-shot on all 5 datasets
+2. **Task 1–4**: Force-exploration — each rank arm (4, 8, 16, 32) gets one pull
+3. **Task 5**: UCB1 exploitation — bandit picks the best-performing rank
+4. **After each task**: LoRA merged → zero-shot eval on all learned tasks → reward computed
+
+### Expected output:
+
+```
+Computing pretrained CLIP zero-shot baselines...
+  fgvc_aircraft: pretrained zero-shot = 23.97%
+  dtd: pretrained zero-shot = 43.99%
+  eurosat: pretrained zero-shot = 46.86%
+  flowers102: pretrained zero-shot = 67.88%
+  oxford_pets: pretrained zero-shot = 87.27%
+
+Starting Task 1 — fgvc_aircraft
+[RankBandit] Task 0: force_explore, Rank chosen: 4
+  ...training 30 epochs...
+  fgvc_aircraft: accuracy = 43.59%
+
+...
+
+TRAINING COMPLETE
+Final accuracies:
+  fgvc_aircraft  :  39.36% (pretrained: 23.97%, Δ=+15.39%)
+  dtd            :  66.44% (pretrained: 43.99%, Δ=+22.45%)
+  eurosat        :  92.37% (pretrained: 46.86%, Δ=+45.51%)
+  flowers102     :  89.87% (pretrained: 67.88%, Δ=+21.99%)
+  oxford_pets    :  95.76% (pretrained: 87.27%, Δ=+8.48%)
+  Average        :  76.76% (pretrained: 54.00%)
+```
+
+## Step 4: Check Results
+
+Checkpoints and metrics are saved to `checkpoints/bandit_run/`:
+
+```
+checkpoints/bandit_run/
+├── model_after_task_0_r4.pt      # After Aircraft (rank=4)
+├── model_after_task_1_r8.pt      # After DTD (rank=8)
+├── model_after_task_2_r16.pt     # After EuroSAT (rank=16)
+├── model_after_task_3_r32.pt     # After Flowers (rank=32)
+├── model_after_task_4_r16.pt     # After Pets (rank=16, UCB1)
+├── model_final_bandit.pt         # Final model
+├── bandit_history.json           # Full bandit state & reward history
+└── cl_metrics.json               # Continual learning metrics
+```
+
+## Configuration
+
+Edit `bandit_config.yaml` to customize:
 
 ```yaml
-datasets:
-  - name: "my_task1"
-    train_path: "data/task1/train.csv"
-    val_path: "data/task1/val.csv"
-    image_dir: "data/task1/images"
-  
-  - name: "my_task2"
-    train_path: "data/task2/train.csv"
-    val_path: "data/task2/val.csv"
-    image_dir: "data/task2/images"
+# Key parameters to tune:
+bandit:
+  rank_choices: [4, 8, 16, 32]     # Available LoRA ranks
+  algorithm: "ucb1"                  # ucb1 | epsilon_greedy | thompson
+  plasticity_w: 0.4                  # Weight for task learning
+  stability_w: 0.6                   # Weight for anti-forgetting
 
 training:
-  batch_size: 256  # Adjust based on GPU memory
-  epochs_per_task: 40
-  base_lr: 0.00001  # 1e-5
+  epochs_per_task: 30                # More epochs = better accuracy
+  base_lr: 0.00005                   # Vision LoRA learning rate
+  text_lr_multiplier: 3              # Text LR = base_lr * multiplier
+  ckc_weight: 2.0                    # CKC distillation strength
+  pretrained_distill_weight: 1.5     # Anchor distillation strength
+
+model:
+  integration_coeff: 0.5             # LoRA merge coefficient
+  # lora_alpha is DYNAMIC: alpha = 2 * rank (uniform scaling=2.0)
 ```
 
-## Step 6: Start Training
+### Key Tuning Tips
 
-```bash
-python src/train.py --config configs/default_config.yaml
-```
+| Parameter | Effect | Guidance |
+|-----------|--------|----------|
+| `epochs_per_task` | More = better accuracy | 30 (recommended), 50 (best) |
+| `stability_w` | Higher = less forgetting | 0.6 (default), 0.7 (conservative) |
+| `ckc_weight` | Higher = more distillation | 2.0 (default), increase if forgetting |
+| `integration_coeff` | Lower = gentler merge | 0.5 (default), 0.3 (very gentle) |
+| `base_lr` | Lower = more stable | 5e-5 (default), 1e-5 (very stable) |
 
 ## Common Issues & Solutions
 
-### Issue: Out of Memory
-
-**Solution**: Reduce batch size or use smaller model
-
+### Out of Memory
 ```yaml
-model:
-  clip_model_name: "ViT-B-32"  # Smaller than ViT-B-16
-
 training:
-  batch_size: 64  # Reduce from 256
+  batch_size: 32            # Reduce from 64
+  accumulate_grad_batches: 8  # Keep effective batch at 256
 ```
 
-### Issue: Slow Training
+### Bandit Always Picks Same Rank
+- This is expected after exploration! UCB1 exploits the best arm.
+- To force more exploration, increase `ucb_c` (e.g., 3.0 or 4.0)
 
-**Solution**: Increase number of data loading workers
+### High Forgetting on Specific Task
+- Increase `pretrained_distill_weight` (e.g., 2.0 or 3.0)
+- Increase `stability_w` (e.g., 0.7)
+- Lower `integration_coeff` (e.g., 0.3)
 
-```yaml
-data:
-  num_workers: 8  # Increase from 4
-```
+## Our Measured Results (30 Epochs, for reference)
 
-### Issue: Poor Performance
+### Accuracy Progression
 
-**Solution**: Adjust learning rates (most common issue)
+| Stage | Aircraft | DTD | EuroSAT | Flowers | Pets |
+|-------|----------|-----|---------|---------|------|
+| Pretrained CLIP | 23.97% | 43.99% | 46.86% | 67.88% | 87.27% |
+| After Task 0 (r=4) | **43.59%** | — | — | — | — |
+| After Task 1 (r=8) | 42.09% | **69.47%** | — | — | — |
+| After Task 2 (r=16) | 39.90% | 67.66% | **93.93%** | — | — |
+| After Task 3 (r=32) | 40.14% | 67.55% | 92.84% | **90.96%** | — |
+| **Final (r=16)** | **39.36%** | **66.44%** | **92.37%** | **89.87%** | **95.76%** |
 
-Different datasets need different learning rates:
+### Key Metrics
 
-```yaml
-# For general datasets (Flickr30K-like)
-training:
-  base_lr: 0.00001  # 1e-5
-  text_lr_multiplier: 10
+| Metric | Value |
+|--------|-------|
+| Average Accuracy (A) | **76.76%** |
+| Average Forgetting (F) | **2.48%** |
+| Backward Transfer (BWT) | **-2.48%** |
+| All above baseline | ✅ Yes |
+| Avg gain over baseline | **+22.76%** |
+| Bandit best rank | r=16 |
 
-# For dense caption datasets (COCO-like)
-training:
-  base_lr: 0.0000005  # 5e-7
-  text_lr_multiplier: 80
-```
-
-## What's Next?
-
-### Monitor Training
-
-If you enable W&B logging:
-
-```yaml
-logging:
-  use_wandb: true
-  project_name: "my-c-clip-project"
-```
-
-Then check your training progress at https://wandb.ai
-
-### Evaluate Your Model
-
-```bash
-# Evaluate per-task checkpoints (zero-shot classification)
-python scripts/eval_zero_shot.py \
-    --checkpoint checkpoints/real_datasets/model_after_task_0.pt \
-    --config configs/real_datasets_config.yaml \
-    --output results/task0_accuracy.json
-
-python scripts/eval_zero_shot.py \
-    --checkpoint checkpoints/real_datasets/model_after_task_1.pt \
-    --config configs/real_datasets_config.yaml \
-    --output results/task1_accuracy.json
-
-python scripts/eval_zero_shot.py \
-    --checkpoint checkpoints/real_datasets/model_final.pt \
-    --config configs/real_datasets_config.yaml \
-    --output results/final_accuracy.json
-```
-
-### Compute All Metrics
-
-```bash
-# Compute paper metrics (Last, Average, Transfer) + traditional CL metrics (BWT, FWT, AF, AIA)
-python scripts/compute_all_metrics.py
-```
-
-Output is saved to `results/comprehensive_metrics.json`.
-
-### Generate PDF Report
-
-```bash
-python scripts/generate_report.py
-```
-
-Produces `results/CCLIP_Implementation_Report.pdf` with all metrics, analysis, and reproducibility commands.
-
-### Use the Trained Model
-
-```python
-from src.models.cclip import CCLIP
-
-# Load model
-model = CCLIP(
-    clip_model_name="ViT-B-16",
-    pretrained="openai",
-    device="cuda"
-)
-model.load_checkpoint("checkpoints/model_final.pt")
-model.eval()
-
-# Encode images and text
-import torch
-from PIL import Image
-
-image = Image.open("test.jpg")
-image_tensor = preprocess(image).unsqueeze(0).to("cuda")
-
-image_features = model.encode_image(image_tensor)
-# Use for retrieval, classification, etc.
-```
-
-## Key Parameters to Tune
-
-### Most Important (tune these first)
-
-1. **Learning Rate** (`base_lr`): Start with 1e-5, adjust per dataset
-2. **Text LR Multiplier** (`text_lr_multiplier`): 10-80x, higher for diverse captions
-3. **Batch Size** (`batch_size`): Larger is better for contrastive learning
-
-### Less Critical (use defaults)
-
-- LoRA rank (`lora_r`): 16 works well
-- Integration coefficient (`integration_coeff`): 0.7 is optimal (was 0.5 in paper)
-- Temperature (`temperature`): 0.07 is standard
-- LoRA targets: `[q_proj, v_proj, c_fc, c_proj]` (attention + MLP)
-
-## Expected Training Time
-
-### Measured (NVIDIA RTX 3050 6GB Laptop GPU):
-
-| Task | Dataset | Train Samples | Epochs | Time |
-|------|---------|---------------|--------|------|
-| 0 | Flowers102 | 6,961 | 40 | ~12 hours |
-| 1 | Oxford Pets | 6,282 | 40 | ~12 hours |
-| 2 | Simpsons | 17,794 | 40 | ~24 hours |
-| **Total** | | **31,037** | **120** | **~48 hours** |
-
-Note: Batch=64, gradient_accumulation=4 (effective 256), precision=16-mixed.
-
-### Estimated for higher-end GPUs:
-
-On a single NVIDIA RTX 4090 (estimated):
-
-- **ViT-B/32**: ~2 hours per task (40 epochs, 1K images, batch 256)
-- **ViT-B/16**: ~4 hours per task (40 epochs, 1K images, batch 256)
-- **ViT-L/14**: ~8 hours per task (40 epochs, 1K images, batch 64)
-
-## Need Help?
-
-1. Check the main [README.md](README.md) for detailed documentation
-2. Run the test suite: `python scripts/test_implementation.py`
-3. Try the minimal example: `python examples/minimal_train.py`
-4. Open an issue on GitHub
-
-## Quick Tips
-
-✅ **DO:**
-- Use large batch sizes (256+) for better contrastive learning
-- Set `drop_last=True` in dataloader
-- Adjust text encoder LR based on caption diversity
-- Monitor both CLIP and CKC losses
-
-❌ **DON'T:**
-- Use tiny batch sizes (<32) - contrastive learning needs negatives
-- Mix different image resolutions in same task
-- Skip validation - helps catch issues early
-- Set learning rate too high - causes instability
+> See [METRICS_ANALYSIS.md](METRICS_ANALYSIS.md) for detailed metric definitions and analysis.
 
 ## Success Checklist
 
 After training, you should see:
 
-- [x] CLIP loss decreasing steadily (Task 0: 2.70 → 0.55)
-- [x] CKC loss active and decreasing on tasks 2+ (Task 2: 0.97 → 0.72)
-- [x] Zero-shot accuracy on trained task > 95% (we got 99.43%, 95.85%, 98.12%)
-- [x] Zero-shot accuracy degradation controlled by CKC
-- [ ] Monitor backward transfer: some forgetting is expected (-9.36% BWT in our case)
-
-### Our Measured Results (for reference)
-
-| Stage | Flowers | Pets | Simpsons |
-|-------|---------|------|----------|
-| Pretrained baseline | 69.63% | 88.72% | 61.58% |
-| After Task 0 | 99.43% | 85.47% | 51.16% |
-| After Task 1 | 99.19% | 95.85% | 53.27% |
-| **Final** | **84.69%** | **91.88%** | **98.12%** |
-| **Gain over baseline** | **+15.06%** | **+3.16%** | **+36.54%** |
-
-### Key Metrics Summary
-
-| Metric | Value |
-|--------|-------|
-| Last (final avg accuracy) | 91.56% |
-| Average (all steps × domains) | 84.34% |
-| Transfer (unseen domains) | 63.30% |
-| Backward Transfer (BWT) | -9.36% |
-| Forward Transfer (FWT) | -5.78% |
-| Avg Incremental Accuracy (AIA) | 96.17% |
-| Avg Gain over baseline | +18.25% |
-
-> See [METRICS_ANALYSIS.md](METRICS_ANALYSIS.md) for detailed metric definitions and interpretations.
-
-If your results are significantly worse, check learning rates and data quality first!
+- [x] All 5 pretrained baselines computed (~54% average)
+- [x] Bandit force-explores ranks 4, 8, 16, 32 on tasks 0–3
+- [x] UCB1 selects r=16 for task 4 (exploitation)
+- [x] Every task finishes above its pretrained baseline
+- [x] Average accuracy > 70%
+- [x] BWT > -5% (minimal forgetting)
+- [x] LoRA utilisation (rank entropy) > 0.99
 
 ---
 
-**Ready to train?** Run `python src/train.py --config configs/default_config.yaml`
+**Ready to train?** Run `python src/train_bandit.py --config bandit_config.yaml --fresh`
 
-**Questions?** Check [README.md](README.md) or open an issue!
+**Questions?** Check [README.md](README.md) or [METRICS_ANALYSIS.md](METRICS_ANALYSIS.md)
